@@ -53,11 +53,11 @@ export default function Sidebar({ isOpen, setIsOpen }) {
 
   const navItems = [
     { label: 'Overview', path: '/dashboard', icon: LayoutDashboard },
-    { label: 'Projects', path: '/dashboard/projects', icon: FolderKanban },
+    { label: 'Teams', path: '/dashboard/teams', icon: Users },
+     { label: 'Projects', path: '/dashboard/projects', icon: FolderKanban },
     { label: 'Tasks Board', path: '/dashboard/tasks', icon: CheckSquare },
     { label: 'Calendar', path: '/dashboard/calendar', icon: Calendar },
     { label: 'Analytics', path: '/dashboard/analytics', icon: BarChart3 },
-    { label: 'Teams', path: '/dashboard/teams', icon: Users },
     // The activity feed is a staff-only audit trail (the API rejects members
     // with a 403), so members are not offered a link that cannot load.
     ...(isStaffOrAdmin ? [{ label: 'Activity Feed', path: '/dashboard/activity', icon: Activity }] : []),

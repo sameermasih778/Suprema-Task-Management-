@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Calendar, Clock, User, AlertCircle, Sparkles } from 'lucide-react';
 import api from '../../utils/api';
@@ -123,28 +124,28 @@ export default function CreateTaskModal({ isOpen, onClose, projectId, onTaskCrea
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md overflow-y-auto p-3 sm:p-4 flex items-center justify-center">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="absolute inset-0"
+          className="fixed inset-0 -z-10"
         />
 
         {/* Modal Window */}
         <motion.div
-          initial={{ scale: 0.93, opacity: 0, y: 16, filter: 'blur(8px)' }}
-          animate={{ scale: 1, opacity: 1, y: 0, filter: 'blur(0px)' }}
-          exit={{ scale: 0.95, opacity: 0, y: 12, filter: 'blur(4px)' }}
-          transition={{ type: 'spring', damping: 26, stiffness: 280 }}
-          className="relative bg-zinc-950 border border-white/15 rounded-3xl w-full max-w-lg p-6 sm:p-8 space-y-6 z-10 shadow-2xl overflow-hidden backdrop-blur-2xl"
+          initial={{ scale: 0.95, opacity: 0, y: 16 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.95, opacity: 0, y: 16 }}
+          transition={{ type: 'spring', damping: 26, stiffness: 300 }}
+          className="relative bg-zinc-950 border border-white/15 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[calc(100vh-2.5rem)] sm:max-h-[88vh] overflow-hidden my-auto backdrop-blur-2xl"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          {/* Header (sticky at top, never cuts off) */}
+          <div className="flex items-center justify-between border-b border-white/10 p-5 sm:p-6 bg-zinc-950/95 shrink-0">
             <div>
               <h2 className="text-xl font-bold text-white tracking-tight">
                 {taskToEdit ? 'Edit Task' : 'Create New Task'}
@@ -155,21 +156,22 @@ export default function CreateTaskModal({ isOpen, onClose, projectId, onTaskCrea
             </div>
             <button
               onClick={onClose}
-              className="p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-900 transition-colors cursor-pointer"
+              type="button"
+              className="p-1.5 text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-900 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Form with scrollable body */}
+          <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
+              {error && (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
             {/* Shown whenever the modal was opened without a project in context,
                 which is the case for the header "New Task" button. */}
             {!projectId && (
@@ -306,8 +308,10 @@ export default function CreateTaskModal({ isOpen, onClose, projectId, onTaskCrea
               />
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+            </div>
+
+            {/* Actions (sticky at bottom) */}
+            <div className="flex items-center justify-end gap-3 p-4 sm:p-6 border-t border-white/10 bg-zinc-950/95 shrink-0">
               <button
                 type="button"
                 onClick={onClose}
@@ -328,4 +332,6 @@ export default function CreateTaskModal({ isOpen, onClose, projectId, onTaskCrea
       </div>
     </AnimatePresence>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }
