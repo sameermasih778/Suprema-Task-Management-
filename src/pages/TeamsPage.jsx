@@ -19,6 +19,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
 
 export default function TeamsPage() {
   const { user, activeWorkspace } = useAuth();
@@ -454,9 +455,22 @@ export default function TeamsPage() {
       {/* ==================================================================== */}
       {/* MODAL 1: CREATE TEAM MODAL */}
       {/* ==================================================================== */}
-      <AnimatePresence>
+      {/* These modals are rendered through a portal into <body>.
+          DashboardLayout animates a `filter` on the page wrapper, and any
+          non-`none` filter turns that wrapper into the containing block for
+          `position: fixed`. In-tree, the modal would therefore be positioned
+          against the tall page box instead of the viewport - the backdrop
+          would not cover the sidebar/header and the box would sit off-centre.
+
+          The whole <AnimatePresence> is portalled, not a portal inside it:
+          framer filters AnimatePresence's children with `isValidElement`, and
+          React's Children.toArray() does not treat a portal as a valid
+          element - so a portalled child would be silently dropped and the
+          modal would never open. */}
+      {createPortal(
+        <AnimatePresence>
         {isCreateTeamOpen && (
-          <div className="fixed inset-0 z-50 overflow-hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] overflow-hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -520,14 +534,17 @@ export default function TeamsPage() {
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* ==================================================================== */}
       {/* MODAL 2: INVITE MEMBER MODAL */}
       {/* ==================================================================== */}
-      <AnimatePresence>
+      {createPortal(
+        <AnimatePresence>
         {isInviteMemberOpen && (
-          <div className="fixed inset-0 z-50 overflow-hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] overflow-hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -615,14 +632,17 @@ export default function TeamsPage() {
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* ==================================================================== */}
       {/* MODAL 3: TEAM DETAILS & SQUAD MANAGEMENT MODAL */}
       {/* ==================================================================== */}
-      <AnimatePresence>
+      {createPortal(
+        <AnimatePresence>
         {selectedTeam && (
-          <div className="fixed inset-0 z-50 overflow-hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] overflow-hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -761,7 +781,9 @@ export default function TeamsPage() {
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }

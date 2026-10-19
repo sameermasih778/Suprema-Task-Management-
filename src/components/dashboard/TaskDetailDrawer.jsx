@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import {
   X,
   CheckCircle2,
@@ -356,9 +357,12 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
     }
   };
 
-  return (
+  // Portalled into <body>: the dashboard page wrapper animates a `filter`,
+  // which makes it the containing block for `position: fixed`. In-tree the
+  // drawer would slide in against the page box instead of the viewport.
+  return createPortal(
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 overflow-hidden bg-black/75 backdrop-blur-sm flex justify-end">
+      <div className="fixed inset-0 z-[100] overflow-hidden bg-black/75 backdrop-blur-sm flex justify-end">
         {/* Backdrop overlay */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -971,6 +975,7 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
           </div>
         </motion.div>
       </div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

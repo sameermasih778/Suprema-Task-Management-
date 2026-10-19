@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import {
   Users, Shield, RotateCcw, Trash2, Bell,
   Search, X, CheckCircle2,
@@ -101,12 +102,15 @@ function BroadcastModal({ onClose, users = [], currentUser }) {
     }
   };
 
-  return (
+  // Portalled into <body>: the dashboard page wrapper animates a `filter`,
+  // which makes it the containing block for `position: fixed`. In-tree the
+  // overlay would be sized against the page box instead of the viewport.
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
     >
       <motion.div
         initial={{ scale: 0.92, opacity: 0, y: 20 }}
@@ -254,7 +258,8 @@ function BroadcastModal({ onClose, users = [], currentUser }) {
             </div>
           </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }
 
@@ -313,12 +318,15 @@ function PasswordModal({ user, onClose }) {
     }
   };
 
-  return (
+  // Portalled into <body>: the dashboard page wrapper animates a `filter`,
+  // which makes it the containing block for `position: fixed`. In-tree the
+  // overlay would be sized against the page box instead of the viewport.
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
     >
       <motion.div
         initial={{ scale: 0.92, opacity: 0, y: 20 }}
@@ -436,7 +444,8 @@ function PasswordModal({ user, onClose }) {
           </div>
         )}
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }
 

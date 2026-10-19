@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BookOpen, Plus, Pencil, Trash2, Loader2, AlertCircle,
   CheckCircle2, RefreshCw, X, Search, Eye, EyeOff, Star
@@ -346,8 +347,11 @@ export default function AdminBlogPage() {
       )}
 
       {/* ────────── Edit / Create Modal ────────── */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 backdrop-blur-sm py-8 px-4 overflow-y-auto">
+      {/* Portalled into <body>: the dashboard page wrapper animates a `filter`,
+          which makes it the containing block for `position: fixed`. In-tree the
+          overlay would be sized against the page box instead of the viewport. */}
+      {modalOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-start justify-center bg-black/70 backdrop-blur-sm py-8 px-4 overflow-y-auto">
           <div className="bg-zinc-950 border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl my-auto">
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
@@ -514,12 +518,13 @@ export default function AdminBlogPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ────────── Delete Confirm ────────── */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+      {deleteTarget && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <div className="bg-zinc-950 border border-white/10 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
             <h3 className="text-base font-bold text-white mb-2">Delete Post?</h3>
             <p className="text-sm text-zinc-400 mb-6">
@@ -539,7 +544,8 @@ export default function AdminBlogPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
