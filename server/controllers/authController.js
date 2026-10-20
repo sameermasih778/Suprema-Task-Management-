@@ -18,6 +18,65 @@ function removeAvatarFile(avatarUrl) {
   });
 }
 
+/**
+ * Copy a Google profile picture into our own storage.
+ *
+ * Storing the googleusercontent URL directly is fragile: Google rate-limits
+ * that CDN (it answers HTTP 429 with an HTML error page, not an image), and
+ * the URL is not guaranteed to keep working. The result is a broken avatar
+ * image for the user, forever, with nothing the app can do about it.
+ *
+ * Mirroring the picture once means the app owns the file: it loads from
+ * Cloudinary (or local disk) like every other upload and it keeps working.
+ *
+ * Best effort by design - if the fetch fails for any reason the caller keeps
+ * the original URL and the frontend falls back to initials, so a failure here
+ * never blocks sign-in.
+ */
+async function mirrorRemoteAvatar(picture, userId) {
+  if (!picture || !/^https?:\/\//i.test(picture)) return null;
+
+  try {
+    const response = await fetch(picture, {
+      signal: AbortSignal.timeout(8000),
+      headers: { Accept: 'image/*' }
+    });
+    if (!response.ok) {
+      console.warn('[Avatar] Could not mirror the profile picture:', response.status);
+      return null;
+    }
+
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.startsWith('image/')) {
+      console.warn('[Avatar] Profile picture was not an image:', contentType);
+      return null;
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length || buffer.length > 5 * 1024 * 1024) return null;
+
+    const ext =
+      contentType.includes('png') ? '.png'
+        : contentType.includes('gif') ? '.gif'
+          : contentType.includes('webp') ? '.webp'
+            : contentType.includes('jpeg') || contentType.includes('jpg') ? '.jpg'
+              : '.jpg';
+
+    // Same signature check as a direct upload: the bytes must really be an
+    // image before anything is stored.
+    if (!verifyImageBuffer(buffer, ext)) {
+      console.warn('[Avatar] Profile picture did not pass the image check');
+      return null;
+    }
+
+    const stored = await saveAvatar(buffer, ext, userId);
+    return stored.url;
+  } catch (err) {
+    console.warn('[Avatar] Could not mirror the profile picture:', err.message);
+    return null;
+  }
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || 'suprema_jwt_super_secret_key_2026_dev_mode';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
@@ -358,9 +417,9 @@ const login = async (req, res, next) => {
 
     // 3. Fetch User's Workspaces
     const [workspaces] = await pool.query(
-      `SELECT w.id, w.name, w.slug, w.plan, wm.role 
-       FROM workspaces w 
-       JOIN workspace_members wm ON w.id = wm.workspace_id 
+      `SELECT w.id, w.name, w.slug, w.plan, w.status, wm.role
+       FROM workspaces w
+       JOIN workspace_members wm ON w.id = wm.workspace_id
        WHERE wm.user_id = ?`,
       [user.id]
     );
@@ -494,6 +553,13 @@ const googleSignIn = async (req, res, next) => {
     let user = existing[0];
     let createdAccount = false;
 
+    // Keep a copy of the picture in our own storage rather than depending on
+    // Google's CDN, which rate-limits and can stop serving the image at any
+    // time. If the copy fails we still keep the original URL - the frontend
+    // falls back to initials, so nothing breaks.
+    const mirroredPicture = picture ? await mirrorRemoteAvatar(picture, user?.id) : null;
+    const storedPicture = mirroredPicture || picture || null;
+
     if (!user) {
       // First time this Google identity is used: create a plain member account.
       // The password column is left as an unusable random hash, because this
@@ -502,7 +568,7 @@ const googleSignIn = async (req, res, next) => {
       const [insert] = await pool.query(
         `INSERT INTO users (name, email, password_hash, avatar_url, role, status)
          VALUES (?, ?, ?, ?, 'member', 'active')`,
-        [name || normalisedEmail.split('@')[0], normalisedEmail, unusableHash, picture || null]
+        [name || normalisedEmail.split('@')[0], normalisedEmail, unusableHash, storedPicture]
       );
       user = {
         id: insert.insertId,
@@ -510,7 +576,7 @@ const googleSignIn = async (req, res, next) => {
         email: normalisedEmail,
         role: 'member',
         status: 'active',
-        avatar_url: picture || null
+        avatar_url: storedPicture
       };
       createdAccount = true;
       console.log(`[Auth] Google sign-up created member account ${user.email}`);
@@ -519,14 +585,14 @@ const googleSignIn = async (req, res, next) => {
         success: false,
         message: `Account Suspended: Your account status is '${user.status}'. Contact support.`
       });
-    } else if (picture && !user.avatar_url) {
+    } else if (storedPicture && !user.avatar_url) {
       // Keep a profile picture only if the user has not set their own.
-      await pool.query('UPDATE users SET avatar_url = ? WHERE id = ?', [picture, user.id]);
-      user.avatar_url = picture;
+      await pool.query('UPDATE users SET avatar_url = ? WHERE id = ?', [storedPicture, user.id]);
+      user.avatar_url = storedPicture;
     }
 
     const [workspaces] = await pool.query(
-      `SELECT w.id, w.name, w.slug, w.plan, wm.role
+      `SELECT w.id, w.name, w.slug, w.plan, w.status, wm.role
        FROM workspaces w
        JOIN workspace_members wm ON w.id = wm.workspace_id
        WHERE wm.user_id = ?`,
@@ -581,9 +647,9 @@ const getMe = async (req, res, next) => {
 
     // Fetch workspaces
     const [workspaces] = await pool.query(
-      `SELECT w.id, w.name, w.slug, w.plan, wm.role 
-       FROM workspaces w 
-       JOIN workspace_members wm ON w.id = wm.workspace_id 
+      `SELECT w.id, w.name, w.slug, w.plan, w.status, wm.role
+       FROM workspaces w
+       JOIN workspace_members wm ON w.id = wm.workspace_id
        WHERE wm.user_id = ?`,
       [userId]
     );

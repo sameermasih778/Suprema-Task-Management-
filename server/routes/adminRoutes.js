@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
+const workspaceAdminController = require('../controllers/workspaceAdminController');
 const leadsController = require('../controllers/leadsController');
 const changelogAdminController = require('../controllers/changelogAdminController');
 const blogAdminController = require('../controllers/blogAdminController');
@@ -14,6 +15,53 @@ router.get(
   '/users',
   authorizeRoles('super_admin', 'admin', 'developer'),
   adminController.getAllUsers
+);
+
+// Every workspace invitation on the platform, with its status and history.
+router.get(
+  '/invitations',
+  authorizeRoles('super_admin', 'admin', 'developer'),
+  adminController.getAllInvitations
+);
+
+// --- Workspace management (admin + super admin) ---
+// Archive is the reversible path and is the normal one. Permanent delete is
+// super admin only, because it destroys every project, task and comment the
+// workspace holds.
+router.get(
+  '/workspaces',
+  authorizeRoles('super_admin', 'admin'),
+  workspaceAdminController.listWorkspaces
+);
+
+router.post(
+  '/workspaces',
+  authorizeRoles('super_admin', 'admin'),
+  workspaceAdminController.createWorkspace
+);
+
+router.get(
+  '/workspaces/:id/deletion-impact',
+  authorizeRoles('super_admin', 'admin'),
+  workspaceAdminController.getWorkspaceDeletionImpact
+);
+
+router.post(
+  '/workspaces/:id/archive',
+  authorizeRoles('super_admin', 'admin'),
+  workspaceAdminController.archiveWorkspace
+);
+
+router.post(
+  '/workspaces/:id/restore',
+  authorizeRoles('super_admin', 'admin'),
+  workspaceAdminController.restoreWorkspace
+);
+
+router.delete(
+  '/workspaces/:id',
+  authorizeRoles('super_admin'),
+  workspaceAdminController.deleteWorkspace
 );
 
 router.patch(

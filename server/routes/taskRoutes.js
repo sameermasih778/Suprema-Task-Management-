@@ -8,6 +8,7 @@ router.use(authenticateToken);
 router.get('/', taskController.getTasks);
 router.post('/', taskController.createTask);
 router.get('/:id', taskController.getTaskById);
+router.get('/:id/activity', taskController.getTaskActivity);
 router.put('/:id', taskController.updateTask);
 router.get('/:id/subtasks', taskController.getSubtasks);
 router.patch('/:id/status', taskController.updateTaskStatus);

@@ -32,6 +32,88 @@ const getAllUsers = async (req, res, next) => {
 };
 
 /**
+ * GET /api/v1/admin/invitations
+ * Every workspace invitation on the platform, with its current status and the
+ * audit trail of how it was answered.
+ *
+ * This is the staff view: invitations are per-workspace, but an admin
+ * overseeing the platform needs to see them all in one place - who was
+ * invited where, by whom, and whether they accepted, declined or never
+ * answered.
+ */
+const getAllInvitations = async (req, res, next) => {
+  try {
+    const [invitations] = await pool.query(
+      `SELECT wi.id, wi.workspace_id, wi.user_id, wi.email, wi.role, wi.status,
+              wi.created_at, wi.responded_at,
+              w.name AS workspace_name,
+              u.name AS invitee_name, u.avatar_url AS invitee_avatar, u.role AS invitee_role,
+              inviter.name AS inviter_name,
+              inviter.id AS inviter_id
+       FROM workspace_invitations wi
+       JOIN workspaces w ON wi.workspace_id = w.id
+       LEFT JOIN users u ON wi.user_id = u.id
+       LEFT JOIN users inviter ON wi.invited_by = inviter.id
+       ORDER BY wi.created_at DESC
+       LIMIT 200`
+    );
+
+    // The audit trail for each invitation, so the page can show the full
+    // story of one invitation and not just its final state.
+    const [history] = await pool.query(
+      `SELECT al.id, al.action, al.entity_id AS workspace_id, al.details, al.created_at,
+              u.name AS actor_name
+       FROM activity_logs al
+       LEFT JOIN users u ON al.user_id = u.id
+       WHERE al.action IN (
+         'WORKSPACE_INVITATION_SENT',
+         'WORKSPACE_INVITATION_ACCEPTED',
+         'WORKSPACE_INVITATION_REJECTED'
+       )
+       ORDER BY al.created_at DESC
+       LIMIT 200`
+    );
+
+    const historyByWorkspace = history.reduce((acc, entry) => {
+      const key = `${entry.workspace_id}`;
+      acc[key] = acc[key] || [];
+      acc[key].push(entry);
+      return acc;
+    }, {});
+
+    const decorated = invitations.map((inv) => {
+      let details = {};
+      try {
+        details =
+          typeof inv.details === 'string' ? JSON.parse(inv.details) : inv.details || {};
+      } catch {
+        details = {};
+      }
+      return {
+        ...inv,
+        invited_by_me: Number(inv.inviter_id) === Number(req.user.id),
+        invitee_name: inv.invitee_name || details.member_name || inv.email,
+        history: historyByWorkspace[String(inv.workspace_id)] || []
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      count: decorated.length,
+      summary: {
+        total: decorated.length,
+        pending: decorated.filter((i) => i.status === 'pending').length,
+        accepted: decorated.filter((i) => i.status === 'accepted').length,
+        rejected: decorated.filter((i) => i.status === 'rejected').length
+      },
+      invitations: decorated
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * PATCH /api/v1/admin/users/:id/role
  * Update a user's role (Super Admin, Admin, Developer)
  * Allows self-role promotion (including assigning super_admin) and issues an immediate fresh token.
@@ -463,6 +545,7 @@ const broadcastNotification = async (req, res, next) => {
 
 module.exports = {
   getAllUsers,
+  getAllInvitations,
   updateUserRole,
   updateUserStatus,
   resetUserPassword,

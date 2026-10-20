@@ -10,11 +10,14 @@ const STAFF_ROLES = ['super_admin', 'admin', 'developer'];
  * The backend already enforces RBAC via authorizeRoles - this guard exists
  * so a non-staff user who types the URL gets a clear message instead of a
  * broken page shell that renders empty before the API returns a 403.
+ *
+ * `roles` narrows the guard for pages that even staff may not open, such as
+ * workspace administration (creating and deleting whole tenants).
  */
-export default function AdminRoute() {
+export default function AdminRoute({ roles = STAFF_ROLES }) {
   const { isAuthenticated, loading, user } = useAuth();
 
-  const isStaff = STAFF_ROLES.includes(user?.role);
+  const isStaff = roles.includes(user?.role);
 
   if (loading) {
     return (
@@ -41,8 +44,7 @@ export default function AdminRoute() {
           <h1 className="text-xl font-bold text-white tracking-tight mb-2">Access Denied</h1>
           <p className="text-sm text-zinc-500 leading-relaxed mb-6">
             This area is restricted to administrators and developers.
-            Your account role is <span className="font-semibold text-zinc-300 capitalize">{user?.role || 'guest'}</span>.
-          </p>
+            Your account role is <span className="font-semibold text-zinc-300 capitalize">{user?.role || 'guest'}</span>.          </p>
           <Link
             to="/dashboard"
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-white text-black text-xs font-bold rounded-xl hover:bg-zinc-200 transition-colors"

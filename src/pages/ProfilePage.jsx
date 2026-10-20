@@ -183,19 +183,25 @@ export default function ProfilePage() {
                 dragging && uploadsAllowed ? 'border-indigo-400' : 'border-white/10'
               }`}
             >
-              {displaySrc && !imageBroken ? (
+              {/* The initials tile always sits BEHIND the picture. A picture
+                  that fails to load (Google rate-limits its CDN, a file can
+                  be deleted) can then never leave an empty or broken-image
+                  circle - the initials show through instead. The alt text is
+                  suppressed because a browser paints it over the layout
+                  until the image resolves. */}
+              <span className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-600 text-2xl font-black text-white">
+                {initials(user?.name)}
+              </span>
+
+              {displaySrc && !imageBroken && (
                 <img
                   src={displaySrc}
-                  alt={user?.name || 'Profile'}
-                  className="h-full w-full object-cover"
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 h-full w-full object-cover"
                   onError={() => setImageBroken(true)}
                 />
-              ) : (
-                <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-600 text-2xl font-black text-white">
-                  {initials(user?.name)}
-                </span>
               )}
-
               {selectedFile && (
                 <span className="absolute inset-x-0 bottom-0 bg-black/80 py-0.5 text-center text-[9px] font-bold uppercase tracking-wide text-indigo-300">
                   Unsaved

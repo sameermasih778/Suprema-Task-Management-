@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
-import { getAvatarFor } from '../utils/avatar';
+import Avatar from '../components/Avatar';
 import {
   Activity,
   CheckCircle2,
@@ -234,8 +234,13 @@ export default function ActivityPage() {
                 <div className="p-4 bg-zinc-950 border border-white/10 hover:border-white/20 rounded-2xl space-y-2 transition-all shadow-lg group-hover:bg-zinc-900/40">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
                     <div className="flex items-center gap-2.5">
-                      <img
-                        src={getAvatarFor({ name: act.user_name, avatar_url: act.user_avatar }, act.user_role)}
+                      <Avatar
+                        person={{
+                          name: act.user_name,
+                          avatar_url: act.user_avatar,
+                          user_role: act.user_role
+                        }}
+                        roleKey="user_role"
                         alt={act.user_name || 'User'}
                         className="w-6 h-6 rounded-full bg-zinc-800 border border-white/10"
                       />

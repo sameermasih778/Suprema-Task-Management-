@@ -81,7 +81,11 @@ export const api = {
   post: (endpoint, body, options = {}) => request(endpoint, { method: 'POST', body, ...options }),
   put: (endpoint, body, options = {}) => request(endpoint, { method: 'PUT', body, ...options }),
   patch: (endpoint, body, options = {}) => request(endpoint, { method: 'PATCH', body, ...options }),
-  delete: (endpoint, options = {}) => request(endpoint, { method: 'DELETE', ...options })
+  // delete takes a BODY too, exactly like post/put/patch. It used to take
+  // fetch options, which meant a payload passed here was silently dropped -
+  // fetch ignored the unknown key, the request went out with no body, and the
+  // server saw nothing at all.
+  delete: (endpoint, body, options = {}) => request(endpoint, { method: 'DELETE', body, ...options })
 };
 
 export default api;

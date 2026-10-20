@@ -37,11 +37,16 @@ CREATE TABLE IF NOT EXISTS workspaces (
     slug VARCHAR(100) NOT NULL UNIQUE,
     owner_id INT NOT NULL,
     plan ENUM('free', 'pro', 'enterprise') NOT NULL DEFAULT 'free',
+    -- 'archived' freezes a workspace: it disappears from the switcher and
+    -- from normal use, but every row of data is kept and it can be restored.
+    -- A permanent delete is a separate, super-admin-only action.
+    status ENUM('active', 'archived') NOT NULL DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE RESTRICT,
     INDEX idx_workspaces_slug (slug),
-    INDEX idx_workspaces_owner (owner_id)
+    INDEX idx_workspaces_owner (owner_id),
+    INDEX idx_workspaces_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 3. WORKSPACE MEMBERS TABLE
@@ -56,6 +61,29 @@ CREATE TABLE IF NOT EXISTS workspace_members (
     UNIQUE KEY uk_workspace_user (workspace_id, user_id),
     INDEX idx_wm_workspace (workspace_id),
     INDEX idx_wm_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 3b. WORKSPACE INVITATIONS TABLE
+-- A pending request to join a workspace. The membership row in
+-- workspace_members is only created once the invitee ACCEPTS, so joining a
+-- workspace is a decision the invited person makes rather than something
+-- that happens to them silently.
+CREATE TABLE IF NOT EXISTS workspace_invitations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    workspace_id INT NOT NULL,
+    user_id INT NOT NULL,
+    email VARCHAR(150) NOT NULL,
+    role ENUM('owner', 'admin', 'member', 'guest') NOT NULL DEFAULT 'member',
+    invited_by INT NOT NULL,
+    status ENUM('pending', 'accepted', 'rejected') NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    responded_at TIMESTAMP DEFAULT NULL,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_wi_workspace (workspace_id),
+    INDEX idx_wi_user (user_id),
+    INDEX idx_wi_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 4. TEAMS TABLE
@@ -187,7 +215,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     user_id INT NOT NULL,
     title VARCHAR(200) NOT NULL,
     message TEXT NOT NULL,
-    type ENUM('info', 'task_assigned', 'mention', 'system', 'announcement') NOT NULL DEFAULT 'info',
+    type ENUM('info', 'task_assigned', 'mention', 'system', 'announcement', 'invitation') NOT NULL DEFAULT 'info',
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     link VARCHAR(255) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

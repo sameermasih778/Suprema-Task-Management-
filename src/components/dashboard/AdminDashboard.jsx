@@ -15,7 +15,9 @@ import {
   FolderKanban,
   RefreshCw,
   Globe,
-  ShieldAlert
+  ShieldAlert,
+  Mail,
+  Building2
 } from 'lucide-react';
 import {
   DashboardShell,
@@ -59,7 +61,21 @@ export default function AdminDashboard() {
   const [healthError, setHealthError] = useState(null);
   const [checking, setChecking] = useState(false);
 
+  // Workspace invitations - only the count is needed here; the list with its
+  // status and history lives on the Invitations page.
+  const [invitations, setInvitations] = useState([]);
+
   const isSuperAdmin = user?.role === 'super_admin';
+
+  const fetchInvitations = useCallback(async () => {
+    try {
+      const res = await api.get('/admin/invitations');
+      setInvitations(res.invitations || []);
+    } catch {
+      // Not a manager of this workspace - nothing to show.
+      setInvitations([]);
+    }
+  }, []);
 
   const fetchAdminData = useCallback(async () => {
     setChecking(true);
@@ -82,6 +98,10 @@ export default function AdminDashboard() {
     fetchAdminData();
   }, [fetchAdminData]);
 
+  useEffect(() => {
+    fetchInvitations();
+  }, [fetchInvitations]);
+
   const safeUsers = Array.isArray(users) ? users : [];
   const roleCounts = safeUsers.reduce((acc, u) => {
     acc[u.role] = (acc[u.role] || 0) + 1;
@@ -89,6 +109,7 @@ export default function AdminDashboard() {
   }, {});
 
   const suspended = safeUsers.filter((u) => u.status === 'suspended').length;
+  const pendingInvitations = invitations.filter((i) => i.status === 'pending').length;
   const dbUp = health?.database === 'CONNECTED';
   const apiUp = health?.status === 'UP';
 
@@ -326,6 +347,32 @@ export default function AdminDashboard() {
               </Link>
 
               <Link
+                to="/dashboard/workspaces"
+                className="flex items-center justify-between rounded-xl border border-white/10 bg-zinc-900/50 px-4 py-3 transition-colors hover:border-[color:var(--accent-ring)]"
+              >
+                <span>
+                  <span className="block text-xs font-semibold text-white">Workspaces</span>
+                  <span className="block text-[11px] text-zinc-500">
+                    Create, freeze or remove a workspace
+                  </span>
+                </span>
+                <Building2 className="h-4 w-4 text-zinc-600" />
+              </Link>
+
+              <Link
+                to="/dashboard/invitations"
+                className="flex items-center justify-between rounded-xl border border-white/10 bg-zinc-900/50 px-4 py-3 transition-colors hover:border-[color:var(--accent-ring)]"
+              >
+                <span>
+                  <span className="block text-xs font-semibold text-white">Invitations</span>
+                  <span className="block text-[11px] text-zinc-500">
+                    {pendingInvitations} awaiting a reply
+                  </span>
+                </span>
+                <Mail className="h-4 w-4 text-zinc-600" />
+              </Link>
+
+              <Link
                 to="/dashboard/activity"
                 className="flex items-center justify-between rounded-xl border border-white/10 bg-zinc-900/50 px-4 py-3 transition-colors hover:border-[color:var(--accent-ring)]"
               >
@@ -346,6 +393,10 @@ export default function AdminDashboard() {
               </p>
             )}
           </SectionCard>
+
+          {/* The invitation list with its status and history lives on the
+              dedicated Invitations page (/dashboard/invitations). The button
+              above is the way there - it is not repeated here. */}
 
           <SectionCard title="Audit trail" icon={<ActivityIcon className="h-4 w-4" />}>
             {loading ? (

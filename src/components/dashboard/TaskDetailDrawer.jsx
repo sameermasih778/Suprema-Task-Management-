@@ -22,10 +22,11 @@ import {
   Edit3,
   Save,
   Check,
-  FolderKanban
+  FolderKanban,
+  History
 } from 'lucide-react';
 import api, { assetUrl } from '../../utils/api';
-import { getAvatarFor } from '../../utils/avatar';
+import Avatar from '../Avatar';
 import { useAuth } from '../../context/AuthContext';
 import { invalidateWorkspaceCache } from '../../utils/dashboardCache';
 
@@ -35,7 +36,7 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
     invalidateWorkspaceCache(activeWorkspace?.id);
     if (rawOnTaskUpdated) rawOnTaskUpdated();
   };
-  const [activeTab, setActiveTab] = useState('subtasks'); // 'subtasks' | 'comments' | 'attachments'
+  const [activeTab, setActiveTab] = useState('subtasks'); // 'subtasks' | 'comments' | 'attachments' | 'activity'
 
   // Task Details & Edit State
   const [taskDetails, setTaskDetails] = useState(task);
@@ -70,6 +71,10 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
   const [loadingAttachments, setLoadingAttachments] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
 
+  // Activity (change history) State
+  const [activity, setActivity] = useState([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+
   // Workspace Members for Assignee selection
   const [members, setMembers] = useState([]);
 
@@ -91,6 +96,7 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
       fetchSubtasks();
       fetchComments();
       fetchAttachments();
+      fetchActivity();
       fetchWorkspaceMembers();
     }
   }, [task?.id, isOpen]);
@@ -125,6 +131,94 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
     } catch (err) {
       console.warn('Failed to fetch workspace members:', err.message);
     }
+  };
+
+  // Fetch Change History (who changed this task and when)
+  const fetchActivity = async () => {
+    if (!task?.id) return;
+    setLoadingActivity(true);
+    try {
+      const res = await api.get(`/tasks/${task.id}/activity`);
+      setActivity(res.activities || []);
+    } catch (err) {
+      console.warn('Failed to fetch task activity:', err.message);
+    } finally {
+      setLoadingActivity(false);
+    }
+  };
+
+  /**
+   * Turn a raw activity_logs row into a human sentence, e.g.
+   * "created this task with high priority" or
+   * "updated priority (medium -> high)".
+   */
+  const formatActivityText = (entry) => {
+    let details = entry.details;
+    if (typeof details === 'string') {
+      try { details = JSON.parse(details); } catch { details = {}; }
+    }
+    details = details || {};
+
+    switch (entry.action) {
+      case 'TASK_CREATED':
+        return details.priority
+          ? `created this task with ${details.priority} priority`
+          : 'created this task';
+      case 'SUBTASK_CREATED':
+        return `added the subtask "${details.title || 'Checklist item'}"`;
+      case 'TASK_UPDATED': {
+        const changes = details.changes || {};
+        const parts = Object.entries(changes).map(([field, value]) => {
+          const label = field.replace(/_/g, ' ');
+          if (value.from === null || value.from === undefined || value.from === '') {
+            return `${label} set to ${value.to}`;
+          }
+          if (value.to === null || value.to === undefined || value.to === '') {
+            return `${label} cleared`;
+          }
+          return `${label} (${value.from} → ${value.to})`;
+        });
+        return parts.length ? `updated ${parts.join(', ')}` : 'updated the task details';
+      }
+      case 'TASK_STATUS_UPDATED':
+        return `moved the task to ${String(details.new_status || '').replace(/_/g, ' ').toUpperCase()}`;
+      case 'SUBTASK_STATUS_UPDATED':
+        return `marked subtask "${details.title || 'subtask'}" as ${String(details.new_status || '').toUpperCase()}`;
+      case 'TASK_DELETED':
+        return 'deleted this task';
+      case 'SUBTASK_DELETED':
+        return `removed the subtask "${details.title || 'subtask'}"`;
+      default:
+        return entry.action.toLowerCase().replace(/_/g, ' ');
+    }
+  };
+
+  /**
+   * "3 hours ago" style stamp.
+   *
+   * The elapsed time is computed by the database (seconds_ago) rather than
+   * from the browser clock: created_at is written by the database, and the
+   * database's clock can differ from the app server's. Both sides of the
+   * subtraction then come from the same clock, so it is always right.
+   */
+  const formatElapsed = (secondsAgo) => {
+    if (secondsAgo === null || secondsAgo === undefined) return '';
+    const abs = Math.abs(secondsAgo);
+    const units = [
+      ['year', 31536000],
+      ['month', 2592000],
+      ['week', 604800],
+      ['day', 86400],
+      ['hour', 3600],
+      ['minute', 60]
+    ];
+    for (const [unit, secs] of units) {
+      if (abs >= secs) {
+        return new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+          .format(-Math.round(secondsAgo / secs), unit);
+      }
+    }
+    return 'just now';
   };
 
   // Save Task Changes
@@ -731,6 +825,19 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
                   <Paperclip className="w-4 h-4" />
                   <span>Files ({attachments.length})</span>
                 </button>
+
+                {/* Tab: History (who changed this task and when) */}
+                <button
+                  onClick={() => setActiveTab('activity')}
+                  className={`text-xs font-bold flex items-center gap-2 pb-2 -mb-2.5 transition-all cursor-pointer ${
+                    activeTab === 'activity'
+                      ? 'text-white border-b-2 border-white'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <History className="w-4 h-4" />
+                  <span>History ({activity.length})</span>
+                </button>
               </div>
 
               {/* ============================================================== */}
@@ -855,8 +962,13 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
                         <div key={c.id} className="p-3.5 bg-zinc-900/60 border border-white/5 rounded-2xl space-y-2">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <img
-                                src={getAvatarFor({ name: c.user_name, avatar_url: c.user_avatar }, c.user_role)}
+                              <Avatar
+                                person={{
+                                  name: c.user_name,
+                                  avatar_url: c.user_avatar,
+                                  user_role: c.user_role
+                                }}
+                                roleKey="user_role"
                                 alt={c.user_name}
                                 className="w-6 h-6 rounded-full bg-zinc-800 border border-white/10"
                               />
@@ -968,6 +1080,66 @@ export default function TaskDetailDrawer({ task, isOpen, onClose, onTaskUpdated:
                       ))
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* ============================================================== */}
+              {/* TAB 4: CHANGE HISTORY - who changed this task and when */}
+              {/* ============================================================== */}
+              {activeTab === 'activity' && (
+                <div className="space-y-3">
+                  <p className="text-[10px] text-zinc-500 leading-relaxed">
+                    Every change to this task is recorded, with who made it and when.
+                  </p>
+
+                  {loadingActivity ? (
+                    <p className="text-xs text-zinc-500 text-center py-4">Loading history...</p>
+                  ) : activity.length === 0 ? (
+                    <p className="text-xs text-zinc-500 text-center py-4">No changes recorded yet.</p>
+                  ) : (
+                    <ol className="relative space-y-4 pl-6">
+                      {/* Timeline spine */}
+                      <span
+                        className="absolute left-[7px] top-2 bottom-2 w-px bg-white/10"
+                        aria-hidden="true"
+                      />
+
+                      {activity.map((entry) => (
+                        <li key={entry.id} className="relative">
+                          <span className="absolute -left-6 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-zinc-800 ring-4 ring-zinc-950">
+                            <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                          </span>
+
+                          <div className="flex items-start gap-2.5">
+                            <Avatar
+                              person={{
+                                name: entry.user_name,
+                                avatar_url: entry.user_avatar,
+                                user_role: entry.user_role
+                              }}
+                              roleKey="user_role"
+                              alt={entry.user_name || 'User'}
+                              className="w-6 h-6 rounded-full bg-zinc-800 flex-shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs text-zinc-300 leading-relaxed">
+                                <span className="font-bold text-white">
+                                  {entry.user_name || 'System'}
+                                </span>{' '}
+                                {formatActivityText(entry)}
+                              </p>
+                              <p
+                                className="text-[10px] text-zinc-500 mt-0.5"
+                                title={new Date(entry.created_at).toLocaleString()}
+                              >
+                                {formatElapsed(entry.seconds_ago)}
+                              </p>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                 </div>
               )}
             </div>

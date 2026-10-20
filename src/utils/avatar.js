@@ -71,3 +71,16 @@ export function getAvatarFor(person, roleKey) {
     roleKey ? person[roleKey] : undefined
   );
 }
+
+/**
+ * Up to two initials for a name, used when a picture cannot be shown.
+ * "Ill Islamic" -> "II", "Sameer Khokhar" -> "SK".
+ */
+export function initialsOf(name) {
+  return (name || '?')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('');
+}

@@ -8,10 +8,10 @@ const getUserWorkspaces = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const [workspaces] = await pool.query(
-      `SELECT w.id, w.name, w.slug, w.plan, w.owner_id, w.created_at, wm.role 
-       FROM workspaces w 
-       JOIN workspace_members wm ON w.id = wm.workspace_id 
-       WHERE wm.user_id = ? 
+      `SELECT w.id, w.name, w.slug, w.plan, w.status, w.owner_id, w.created_at, wm.role
+       FROM workspaces w
+       JOIN workspace_members wm ON w.id = wm.workspace_id
+       WHERE wm.user_id = ?
        ORDER BY w.created_at DESC`,
       [userId]
     );

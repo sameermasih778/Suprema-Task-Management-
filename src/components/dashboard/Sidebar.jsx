@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import usePublicNavOffset from '../../hooks/usePublicNavOffset';
-import { getAvatarUrl } from '../../utils/avatar';
+import Avatar from '../Avatar';
 import {
   LayoutDashboard,
   FolderKanban,
@@ -11,6 +11,7 @@ import {
   Users,
   Activity,
   Inbox,
+  Mail,
   GitCommitVertical,
   LogOut,
   ChevronDown,
@@ -32,6 +33,9 @@ export default function Sidebar({ isOpen, setIsOpen }) {
   const location = useLocation();
 
   const isStaffOrAdmin = ['super_admin', 'admin', 'developer'].includes(user?.role);
+  // Platform admins administer the whole tenant layer: create, freeze and
+  // remove workspaces. A developer works inside them but does not own them.
+  const isPlatformAdmin = ['super_admin', 'admin'].includes(user?.role);
 
   // The sidebar is `position: fixed`, so it ignores the DashboardLayout top
   // padding and would slide underneath the public Navbar (also fixed, z-50) on
@@ -61,6 +65,11 @@ export default function Sidebar({ isOpen, setIsOpen }) {
     // The activity feed is a staff-only audit trail (the API rejects members
     // with a 403), so members are not offered a link that cannot load.
     ...(isStaffOrAdmin ? [{ label: 'Activity Feed', path: '/dashboard/activity', icon: Activity }] : []),
+    // Every workspace invitation and its status. Staff only, like the feed.
+    ...(isStaffOrAdmin ? [{ label: 'Invitations', path: '/dashboard/invitations', icon: Mail }] : []),
+    // Create, freeze and remove workspaces. Platform admins only - a
+    // developer has no business creating or deleting a whole tenant.
+    ...(isPlatformAdmin ? [{ label: 'Workspaces', path: '/dashboard/workspaces', icon: Building2 }] : []),
     // Staff use a fixed role emblem and have no picture to change, so the
     // Profile page is only offered to member / viewer accounts.
     ...(!isStaffOrAdmin ? [{ label: 'My Profile', path: '/dashboard/profile', icon: Settings }] : []),
@@ -122,7 +131,9 @@ export default function Sidebar({ isOpen, setIsOpen }) {
                   <div className="px-2 py-1.5 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
                     Your Workspaces
                   </div>
-                  {user?.workspaces?.map((ws) => (
+                  {user?.workspaces
+                    ?.filter((ws) => ws.status !== 'archived')
+                    .map((ws) => (
                     <motion.button
                       key={ws.id}
                       whileHover={{ x: 2 }}
@@ -140,7 +151,7 @@ export default function Sidebar({ isOpen, setIsOpen }) {
                       <span className="truncate">{ws.name}</span>
                       <span className="text-[9px] opacity-75 uppercase">{ws.role}</span>
                     </motion.button>
-                  ))}
+                    ))}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -218,9 +229,8 @@ export default function Sidebar({ isOpen, setIsOpen }) {
               no picture to change, so theirs is a static identity block. */}
           {isStaffOrAdmin ? (
             <div className="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden px-1 py-0.5">
-              <img
-                src={getAvatarUrl(user)}
-                alt={user?.name}
+              <Avatar
+                person={user}
                 className="h-8 w-8 flex-shrink-0 rounded-full border border-white/10 bg-zinc-800 object-cover"
               />
               <div className="min-w-0 overflow-hidden text-left">
@@ -238,9 +248,8 @@ export default function Sidebar({ isOpen, setIsOpen }) {
               title="Profile settings"
               className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-white/5"
             >
-              <img
-                src={getAvatarUrl(user)}
-                alt={user?.name}
+              <Avatar
+                person={user}
                 className="h-8 w-8 flex-shrink-0 rounded-full border border-white/10 bg-zinc-800 object-cover"
               />
               <div className="min-w-0 overflow-hidden text-left">

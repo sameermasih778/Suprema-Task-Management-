@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
-import { getAvatarFor } from '../utils/avatar';
+import Avatar from '../components/Avatar';
 import {
   Users,
   Plus,
@@ -51,8 +52,21 @@ export default function TeamsPage() {
   const [assignRole, setAssignRole] = useState('member');
   const [submittingAssign, setSubmittingAssign] = useState(false);
 
+  // Invitations state
+  // myInvitations - requests addressed to ME (accept / decline). The list of
+  // invitations this workspace SENT, with their status, lives on the staff
+  // Invitations page instead.
+  const [myInvitations, setMyInvitations] = useState([]);
+  const [respondingToId, setRespondingToId] = useState(null);
+
   const canManage = ['super_admin', 'admin', 'member'].includes(user?.role);
   const isStaff = ['super_admin', 'admin', 'developer'].includes(user?.role);
+
+  // A notification links straight to the invitation it is about, so the
+  // matching card is highlighted when the page is opened from the bell.
+  const [searchParams] = useSearchParams();
+  const highlightedInvitationId = searchParams.get('invitation');
+  const pendingInvitations = myInvitations.filter((i) => i.status === 'pending');
   // Controls inside the team modal are gated PER TEAM: staff can manage any
   // team, a non-staff user only the team they created. The backend enforces
   // the same rule; this just keeps the UI honest about it.
@@ -79,9 +93,42 @@ export default function TeamsPage() {
     }
   };
 
+  // The invitations addressed to me. The full platform-wide list, with each
+  // invitation's status and history, is on the staff Invitations page.
+  const fetchInvitations = async () => {
+    try {
+      const mine = await api.get('/invitations');
+      setMyInvitations(mine.invitations || []);
+    } catch (err) {
+      console.warn('Error fetching invitations:', err.message);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    fetchInvitations();
   }, [activeWorkspace?.id]);
+
+  // Accept or decline an invitation. Accepting is what actually makes the
+  // person a member of the workspace.
+  const handleRespondInvitation = async (invitationId, action) => {
+    setRespondingToId(invitationId);
+    try {
+      const res = await api.post(`/invitations/${invitationId}/respond`, { action });
+      if (res.success) {
+        setInviteMsg({ type: 'success', text: res.message });
+        await fetchInvitations();
+        fetchData();
+      }
+    } catch (err) {
+      setInviteMsg({
+        type: 'error',
+        text: err.message || 'Could not respond to the invitation.'
+      });
+    } finally {
+      setRespondingToId(null);
+    }
+  };
 
   // Create Team
   const handleCreateTeam = async (e) => {
@@ -107,21 +154,23 @@ export default function TeamsPage() {
     }
   };
 
-  // Invite Member to Workspace
+  // Invite Member to Workspace.
+  // This sends a REQUEST. The person becomes a member only once they accept,
+  // so there is no silent add and they are told it happened.
   const handleInviteMember = async (e) => {
     e.preventDefault();
     if (!inviteEmail.trim() || !activeWorkspace?.id) return;
     setSubmittingInvite(true);
     setInviteMsg(null);
     try {
-      const res = await api.post(`/workspaces/${activeWorkspace.id}/members`, {
+      const res = await api.post(`/workspaces/${activeWorkspace.id}/invitations`, {
         email: inviteEmail.trim(),
         role: inviteRole
       });
       if (res.success) {
-        setInviteMsg({ type: 'success', text: res.message || 'Member invited successfully!' });
+        setInviteMsg({ type: 'success', text: res.message || 'Invitation sent!' });
         setInviteEmail('');
-        fetchData();
+        fetchInvitations();
         setTimeout(() => {
           setIsInviteMemberOpen(false);
           setInviteMsg(null);
@@ -240,6 +289,90 @@ export default function TeamsPage() {
           </div>
         )}
       </div>
+
+      {/* ================================================================ */}
+      {/* SECTION 0: INVITATIONS - requests to join, and how they went   */}
+      {/* ================================================================ */}
+      {pendingInvitations.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+              <Mail className="w-4 h-4 text-indigo-400" />
+              <span>Invitations for you</span>
+              <span className="text-[10px] bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 font-bold px-2 py-0.5 rounded-full">
+                {pendingInvitations.length}
+              </span>
+            </h2>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-[10px] text-zinc-500">
+                You are not a member until you accept
+              </span>
+              {isStaff && (
+                <Link
+                  to="/dashboard/invitations"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-semibold text-zinc-400 transition-colors hover:text-white"
+                >
+                  <UserCheck className="h-3 w-3" />
+                  All invitations &amp; their status
+                </Link>
+              )}
+            </div>
+          </div>
+
+          {pendingInvitations.map((inv) => (
+            <div
+              key={inv.id}
+              className={`bg-zinc-950 border border-indigo-500/25 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between ${
+                highlightedInvitationId === String(inv.id)
+                  ? 'ring-2 ring-indigo-500/50'
+                  : ''
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <Avatar
+                  person={{
+                    name: inv.inviter_name,
+                    avatar_url: inv.inviter_avatar,
+                    global_role: 'member'
+                  }}
+                  roleKey="global_role"
+                  alt={inv.inviter_name || 'Inviter'}
+                  className="w-10 h-10 rounded-full bg-zinc-800 flex-shrink-0"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-white truncate">{inv.workspace_name}</p>
+                  <p className="text-[11px] text-zinc-400">
+                    {inv.inviter_name || 'An administrator'} invited you to join as{' '}
+                    <span className="text-zinc-200 font-semibold capitalize">{inv.role}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 flex-shrink-0">
+                <button
+                  onClick={() => handleRespondInvitation(inv.id, 'reject')}
+                  disabled={respondingToId === inv.id}
+                  className="px-4 py-2 text-xs font-semibold text-zinc-400 hover:text-white rounded-xl border border-white/10 hover:bg-zinc-900 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  Decline
+                </button>
+                <button
+                  onClick={() => handleRespondInvitation(inv.id, 'accept')}
+                  disabled={respondingToId === inv.id}
+                  className="px-5 py-2 text-xs font-bold bg-white text-black rounded-xl hover:bg-zinc-200 transition-colors disabled:opacity-50 cursor-pointer shadow-md"
+                >
+                  {respondingToId === inv.id ? 'Working...' : 'Accept'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* NOTE: the list of invitations this workspace SENT, with their
+          status and history, lives on the staff-only Invitations page
+          (/dashboard/invitations). It is deliberately not repeated here -
+          this page is about acting on an invitation, not reporting on them. */}
 
       {/* SECTION 0: MY TEAMS - teams you belong to, across every
             workspace, so a team you were added to is always visible
@@ -413,8 +546,9 @@ export default function TeamsPage() {
                   return (
                     <tr key={m.id} className="hover:bg-white/[0.02] transition-colors">
                       <td className="p-4 flex items-center gap-3 font-semibold text-white">
-                        <img
-                          src={getAvatarFor(m, 'global_role')}
+                        <Avatar
+                          person={m}
+                          roleKey="global_role"
                           alt={m.name}
                           className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10"
                         />
@@ -742,8 +876,9 @@ export default function TeamsPage() {
                         className="flex items-center justify-between p-3 bg-zinc-900/40 border border-white/5 rounded-xl text-xs"
                       >
                         <div className="flex items-center gap-3">
-                          <img
-                            src={getAvatarFor(tm, 'global_role')}
+                          <Avatar
+                            person={tm}
+                            roleKey="global_role"
                             alt={tm.name}
                             className="w-7 h-7 rounded-full bg-zinc-800"
                           />

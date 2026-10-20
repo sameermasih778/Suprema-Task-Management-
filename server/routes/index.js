@@ -11,6 +11,7 @@ const commentRoutes = require('./commentRoutes');
 const attachmentRoutes = require('./attachmentRoutes');
 const notificationRoutes = require('./notificationRoutes');
 const activityRoutes = require('./activityRoutes');
+const invitationRoutes = require('./invitationRoutes');
 const adminRoutes = require('./adminRoutes');
 const marketingRoutes = require('./marketingRoutes');
 
@@ -25,6 +26,7 @@ router.use('/comments', commentRoutes);
 router.use('/attachments', attachmentRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/activity', activityRoutes);
+router.use('/invitations', invitationRoutes);
 router.use('/admin', adminRoutes);
 
 // --- Public Marketing (no session required) ---

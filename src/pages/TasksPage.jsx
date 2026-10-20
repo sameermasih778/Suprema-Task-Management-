@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -53,6 +53,33 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const { setIsNewTaskModalOpen, setEditingTask, setNewTaskProjectId } = useOutletContext() || {};
+
+  // Deep link: /dashboard/tasks?task=123 opens that task straight away. This
+  // is the target of the "a task was assigned to you" notification, so the
+  // bell actually takes the user to the work instead of just the board.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkTaskId = searchParams.get('task');
+
+  useEffect(() => {
+    if (!deepLinkTaskId) return undefined;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = await api.get(`/tasks/${deepLinkTaskId}`);
+        if (cancelled || !data.success || !data.task) return;
+        if (data.task.project_id) {
+          setSelectedProjectId(String(data.task.project_id));
+        }
+        setSelectedTask(data.task);
+        setIsDrawerOpen(true);
+      } catch (err) {
+        console.warn('Could not open linked task:', err.message);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [deepLinkTaskId]);
 
   // Dragging state
   const [draggedTaskId, setDraggedTaskId] = useState(null);
@@ -650,7 +677,15 @@ export default function TasksPage() {
       <TaskDetailDrawer
         task={selectedTask}
         isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
+        onClose={() => {
+          setIsDrawerOpen(false);
+          // Clear the deep link so closing the drawer does not immediately
+          // re-open it on the next render.
+          if (searchParams.get('task')) {
+            searchParams.delete('task');
+            setSearchParams(searchParams, { replace: true });
+          }
+        }}
         onTaskUpdated={fetchTasks}
       />
     </div>

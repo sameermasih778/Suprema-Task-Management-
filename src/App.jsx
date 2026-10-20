@@ -40,6 +40,8 @@ import AdminChangelogPage from './pages/AdminChangelogPage';
 import AdminBlogPage from './pages/AdminBlogPage';
 import AdminOverviewPage from './pages/AdminOverviewPage';
 import ActivityPage from './pages/ActivityPage';
+import InvitationsPage from './pages/InvitationsPage';
+import WorkspacesPage from './pages/WorkspacesPage';
 import CalendarPage from './pages/CalendarPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 
@@ -134,6 +136,14 @@ function MainLayout() {
                       this, so the route guard gives members a clear message
                       instead of an empty shell that logs a 403. */}
                   <Route path="activity" element={<ActivityPage />} />
+                  {/* Every workspace invitation and how it was answered. */}
+                  <Route path="invitations" element={<InvitationsPage />} />
+                </Route>
+                {/* Workspace administration is narrower than the rest of the
+                    admin area: creating, freezing and deleting a whole tenant
+                    is a platform-admin action, not a developer one. */}
+                <Route element={<AdminRoute roles={['super_admin', 'admin']} />}>
+                  <Route path="workspaces" element={<WorkspacesPage />} />
                 </Route>
               </Route>
             </Route>

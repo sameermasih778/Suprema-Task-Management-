@@ -530,6 +530,125 @@ const migrations = [
       }
       return { status: 'applied', detail: detail.join('; ') };
     }
+  },
+
+  {
+    // workspace_invitations - pending requests to join a workspace.
+    //
+    // Until this table existed, "Invite Collaborator" inserted straight into
+    // workspace_members: the person became a member immediately and silently,
+    // with no way to accept or decline and no notification. A workspace
+    // invitation is a request, and the request needs somewhere to live.
+    name: '008-workspace-invitations-table',
+    async up(pool) {
+      const [rows] = await pool.query("SHOW TABLES LIKE 'workspace_invitations'");
+      if (rows.length > 0) {
+        return { status: 'current', detail: 'workspace_invitations table already exists' };
+      }
+
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS workspace_invitations (
+           id INT AUTO_INCREMENT PRIMARY KEY,
+           workspace_id INT NOT NULL,
+           user_id INT NOT NULL,
+           email VARCHAR(150) NOT NULL,
+           role ENUM('admin', 'member', 'guest') NOT NULL DEFAULT 'member',
+           invited_by INT NOT NULL,
+           status ENUM('pending', 'accepted', 'rejected') NOT NULL DEFAULT 'pending',
+           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+           responded_at TIMESTAMP DEFAULT NULL,
+           FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+           FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE,
+           INDEX idx_wi_workspace (workspace_id),
+           INDEX idx_wi_user (user_id),
+           INDEX idx_wi_status (status)
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+      );
+
+      return { status: 'applied', detail: 'created workspace_invitations table' };
+    }
+  },
+
+  {
+    // notifications.type needs an 'invitation' value.
+    //
+    // Same reason as migration 003: this server runs without
+    // STRICT_TRANS_TABLES, so an unknown type is silently coerced to '' and
+    // the header dropdown cannot style it. An invitation notification is
+    // distinct from a plain 'system' message - it is the one the invitee has
+    // to act on.
+    name: '009-notifications-type-enum-includes-invitation',
+    async up(pool) {
+      const [rows] = await pool.query("SHOW COLUMNS FROM notifications LIKE 'type'");
+      if (rows.length === 0) {
+        return { status: 'skipped', detail: 'notifications.type column not found - run `npm run db:init`' };
+      }
+
+      const current = rows[0].Type;
+      if (current.includes("'invitation'")) {
+        return { status: 'current', detail: current };
+      }
+
+      await pool.query(
+        "ALTER TABLE notifications MODIFY type ENUM('info','task_assigned','mention','system','announcement','invitation') NOT NULL DEFAULT 'info'"
+      );
+
+      return { status: 'applied', detail: `${current} -> + 'invitation'` };
+    }
+  },
+
+  {
+    // workspaces.status - so a workspace can be archived instead of deleted.
+    //
+    // Deleting a workspace cascades through members, teams, projects, tasks,
+    // comments, attachments and the audit trail. Archiving freezes it instead:
+    // it leaves the switcher, every row is kept, and it can be restored.
+    name: '010-workspaces-status-column',
+    async up(pool) {
+      const [cols] = await pool.query("SHOW COLUMNS FROM workspaces LIKE 'status'");
+      if (cols.length > 0) {
+        return { status: 'current', detail: 'workspaces.status already exists' };
+      }
+
+      const [table] = await pool.query("SHOW TABLES LIKE 'workspaces'");
+      if (table.length === 0) {
+        return { status: 'skipped', detail: 'workspaces table not found - run `npm run db:init`' };
+      }
+
+      await pool.query(
+        "ALTER TABLE workspaces ADD COLUMN status ENUM('active', 'archived') NOT NULL DEFAULT 'active' AFTER plan"
+      );
+      await pool.query('CREATE INDEX idx_workspaces_status ON workspaces (status)');
+
+      return { status: 'applied', detail: 'added workspaces.status (active/archived)' };
+    }
+  },
+
+  {
+    // workspace_invitations.role needs an 'owner' value.
+    //
+    // When an admin creates a workspace for a named colleague, that colleague
+    // is invited as the owner and only becomes a member by accepting - so the
+    // invitation has to be able to carry the 'owner' role.
+    name: '011-workspace-invitations-role-enum-includes-owner',
+    async up(pool) {
+      const [rows] = await pool.query("SHOW COLUMNS FROM workspace_invitations LIKE 'role'");
+      if (rows.length === 0) {
+        return { status: 'skipped', detail: 'workspace_invitations.role not found - run `npm run db:init`' };
+      }
+
+      const current = rows[0].Type;
+      if (current.includes("'owner'")) {
+        return { status: 'current', detail: current };
+      }
+
+      await pool.query(
+        "ALTER TABLE workspace_invitations MODIFY role ENUM('owner','admin','member','guest') NOT NULL DEFAULT 'member'"
+      );
+
+      return { status: 'applied', detail: `${current} -> + 'owner'` };
+    }
   }
 ];
 
