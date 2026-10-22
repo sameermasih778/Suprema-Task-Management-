@@ -34,13 +34,12 @@ beforeAll(async () => {
 // Everything this file creates, tracked so the table is provably restored.
 const created = [];
 afterEach(async () => {
-  if (created.length) {
-    await pool.query(
-      'DELETE FROM changelogs WHERE tag_id IN (?)',
-      [created]
-    );
-    created.length = 0;
+  // One statement per tag: node-postgres sends a JavaScript array as several
+  // bind parameters, which does not fit a single $1 placeholder.
+  for (const tag of created) {
+    await pool.query('DELETE FROM changelogs WHERE tag_id = $1', [tag]);
   }
+  created.length = 0;
 });
 
 describe('POST /admin/changelogs - validation', () => {
@@ -247,8 +246,8 @@ describe('escaped line breaks in text fields', () => {
 
     await pool.query(
       `INSERT INTO changelogs (tag_id, date, release_date, title, banner_title)
-       VALUES (?, 'Jan 1, 2030', '2030-01-01', 'Legacy row',
-               CONCAT('Legacy heading', CHAR(92), 'ncontinued'))`,
+       VALUES ($1, 'Jan 1, 2030', '2030-01-01', 'Legacy row',
+               CONCAT('Legacy heading', CHR(92), 'ncontinued')) RETURNING id`,
       [tag]
     );
 

@@ -32,11 +32,15 @@ beforeAll(async () => {
 
 afterEach(async () => {
   if (createdWorkspaceIds.length) {
-    await pool.query('DELETE FROM workspaces WHERE id IN (?)', [createdWorkspaceIds]);
+    for (const id of createdWorkspaceIds) {
+      await pool.query('DELETE FROM workspaces WHERE id = $1', [id]);
+    }
     createdWorkspaceIds.length = 0;
   }
   if (createdUserIds.length) {
-    await pool.query('DELETE FROM users WHERE id IN (?)', [createdUserIds]);
+    for (const id of createdUserIds) {
+      await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    }
     createdUserIds.length = 0;
   }
 });
@@ -58,7 +62,7 @@ const createInvitee = async () => {
   const bcrypt = require('bcryptjs');
   const hash = await bcrypt.hash('TestPass123!', 4);
   const [result] = await pool.query(
-    'INSERT INTO users (name, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO users (name, email, password_hash, role, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
     ['Invitee Person', email, hash, 'member', 'active']
   );
   createdUserIds.push(result.insertId);
@@ -81,7 +85,7 @@ describe('POST /api/v1/workspaces/:id/invitations', () => {
 
     const [notifs] = await pool.query(
       `SELECT title, message, type, link FROM notifications
-       WHERE user_id = ? AND type = 'invitation'`,
+       WHERE user_id = $1 AND type = 'invitation'`,
       [invitee.id]
     );
     expect(notifs).toHaveLength(1);
@@ -99,7 +103,7 @@ describe('POST /api/v1/workspaces/:id/invitations', () => {
       .send({ email: invitee.email, role: 'member' });
 
     const [members] = await pool.query(
-      'SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [workspaceId, invitee.id]
     );
     expect(members).toHaveLength(0);
@@ -110,7 +114,7 @@ describe('POST /api/v1/workspaces/:id/invitations', () => {
     const invitee = await createInvitee();
 
     await pool.query(
-      'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)',
+      'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id',
       [workspaceId, invitee.id, 'member']
     );
 
@@ -176,7 +180,7 @@ describe('POST /api/v1/invitations/:id/respond', () => {
     expect(res.body.invitation.status).toBe('accepted');
 
     const [members] = await pool.query(
-      'SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [workspaceId, invitee.id]
     );
     expect(members).toHaveLength(1);
@@ -195,7 +199,7 @@ describe('POST /api/v1/invitations/:id/respond', () => {
     expect(res.body.invitation.status).toBe('rejected');
 
     const [members] = await pool.query(
-      'SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [workspaceId, invitee.id]
     );
     expect(members).toHaveLength(0);
@@ -211,7 +215,7 @@ describe('POST /api/v1/invitations/:id/respond', () => {
 
     const [notifs] = await pool.query(
       `SELECT title, message FROM notifications
-       WHERE user_id = ? AND title LIKE '%invitation%'`,
+       WHERE user_id = $1 AND title LIKE '%invitation%'`,
       [F.admin.id]
     );
     expect(notifs.length).toBeGreaterThan(0);

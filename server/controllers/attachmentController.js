@@ -28,7 +28,7 @@ const uploadAttachment = async (req, res, next) => {
 
     const [result] = await pool.query(
       `INSERT INTO task_attachments (task_id, user_id, filename, original_name, file_path, file_size, mime_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [task_id, userId, stored.publicId, file.originalname, file_path, file.buffer.length, file.mimetype]
     );
 
@@ -74,7 +74,7 @@ const getTaskAttachments = async (req, res, next) => {
               u.name AS uploader_name
        FROM task_attachments ta
        JOIN users u ON ta.user_id = u.id
-       WHERE ta.task_id = ?
+       WHERE ta.task_id = $1
        ORDER BY ta.created_at DESC`,
       [task_id]
     );
@@ -109,7 +109,7 @@ const deleteAttachment = async (req, res, next) => {
          FROM task_attachments a
          JOIN tasks    t ON t.id = a.task_id
          JOIN projects p ON p.id = t.project_id
-        WHERE a.id = ?`,
+        WHERE a.id = $1`,
       [attachmentId]
     );
 
@@ -136,7 +136,7 @@ const deleteAttachment = async (req, res, next) => {
 
     if (!isStaff && attachment.uploader_id !== userId) {
       const [membership] = await pool.query(
-        'SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+        'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
         [attachment.workspace_id, userId]
       );
       const workspaceRole = membership[0]?.role;
@@ -158,7 +158,7 @@ const deleteAttachment = async (req, res, next) => {
       console.warn('[Attachment] Could not remove stored file:', cleanupError.message);
     }
 
-    await pool.query('DELETE FROM task_attachments WHERE id = ?', [attachmentId]);
+    await pool.query('DELETE FROM task_attachments WHERE id = $1', [attachmentId]);
 
     res.status(200).json({
       success: true,

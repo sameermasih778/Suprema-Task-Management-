@@ -20,7 +20,7 @@ const getWorkspaceActivity = async (req, res, next) => {
               u.name AS user_name, u.avatar_url AS user_avatar, u.role AS user_role
        FROM activity_logs al
        LEFT JOIN users u ON al.user_id = u.id
-       WHERE al.workspace_id = ?
+       WHERE al.workspace_id = $1
        ORDER BY al.created_at DESC
        LIMIT 50`,
       [workspace_id]

@@ -42,7 +42,7 @@ async function main() {
     process.exit(1);
   }
 
-  const [users] = await pool.query('SELECT id, name, email FROM users WHERE email = ?', [email]);
+  const [users] = await pool.query('SELECT id, name, email FROM users WHERE email = $1', [email]);
   if (users.length === 0) {
     console.error(`No user found with email: ${email}`);
     process.exit(1);
@@ -50,7 +50,7 @@ async function main() {
 
   const user = users[0];
   const password_hash = await bcrypt.hash(newPassword, 12);
-  const [result] = await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash, user.id]);
+  const [result] = await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [password_hash, user.id]);
 
   // Guard against a silent no-op: a matched-looking UPDATE that changed zero
   // rows would leave the old password in place and report success.
@@ -63,7 +63,7 @@ async function main() {
 
   // Read it back and prove the new password actually verifies against what is
   // now stored - the only check that matters.
-  const [check] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [user.id]);
+  const [check] = await pool.query('SELECT password_hash FROM users WHERE id = $1', [user.id]);
   const verified = await bcrypt.compare(newPassword, check[0].password_hash);
   if (!verified) {
     console.error('ERROR: stored hash does not verify against the new password. Aborting.');

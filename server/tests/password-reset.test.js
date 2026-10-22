@@ -97,7 +97,7 @@ describe('POST /auth/forgot-password', () => {
     const token = tokenFromResponse(res.body);
 
     const [rows] = await pool.query(
-      'SELECT token_hash, expires_at, used_at FROM password_reset_tokens WHERE user_id = ?',
+      'SELECT token_hash, expires_at, used_at FROM password_reset_tokens WHERE user_id = $1',
       [account.id]
     );
     expect(rows).toHaveLength(1);
@@ -107,7 +107,7 @@ describe('POST /auth/forgot-password', () => {
 
     // The raw token must not be recoverable from any column of any row.
     const [dump] = await pool.query(
-      'SELECT * FROM password_reset_tokens WHERE user_id = ?',
+      'SELECT * FROM password_reset_tokens WHERE user_id = $1',
       [account.id]
     );
     expect(JSON.stringify(dump)).not.toContain(token);
@@ -140,7 +140,7 @@ describe('POST /auth/forgot-password', () => {
   test('a suspended account gets the same answer and no token', async () => {
     const account = await makeAccount('suspended');
 
-    await pool.query("UPDATE users SET status = 'suspended' WHERE id = ?", [account.id]);
+    await pool.query("UPDATE users SET status = 'suspended' WHERE id = $1", [account.id]);
 
     const res = await request(app)
       .post(`${AUTH}/forgot-password`)
@@ -150,7 +150,7 @@ describe('POST /auth/forgot-password', () => {
     expect(res.body.devResetUrl).toBeUndefined();
 
     const [rows] = await pool.query(
-      'SELECT COUNT(*) AS c FROM password_reset_tokens WHERE user_id = ?',
+      'SELECT COUNT(*) AS c FROM password_reset_tokens WHERE user_id = $1',
       [account.id]
     );
     expect(rows[0].c).toBe(0);
@@ -222,7 +222,7 @@ describe('GET /auth/reset-password/verify', () => {
 
     // Backdate in SQL, matching how the controller itself compares expiry.
     await pool.query(
-      'UPDATE password_reset_tokens SET expires_at = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE token_hash = ?',
+      'UPDATE password_reset_tokens SET expires_at = NOW() - INTERVAL \'1 minute\' WHERE token_hash = $1',
       [sha256(token)]
     );
 
@@ -299,7 +299,7 @@ describe('POST /auth/reset-password', () => {
     expect(verify.body.message).toMatch(/already been used/i);
 
     // The stored hash must actually match the new password.
-    const [rows] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [account.id]);
+    const [rows] = await pool.query('SELECT password_hash FROM users WHERE id = $1', [account.id]);
     expect(await bcrypt.compare(NEW_PASSWORD, rows[0].password_hash)).toBe(true);
 
     await deleteUserByEmail(account.email);
@@ -312,7 +312,7 @@ describe('POST /auth/reset-password', () => {
     );
 
     await pool.query(
-      'UPDATE password_reset_tokens SET expires_at = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE token_hash = ?',
+      'UPDATE password_reset_tokens SET expires_at = NOW() - INTERVAL \'1 minute\' WHERE token_hash = $1',
       [sha256(token)]
     );
 

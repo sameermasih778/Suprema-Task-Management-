@@ -25,18 +25,18 @@ const getProjects = async (req, res, next) => {
       FROM projects p
       LEFT JOIN users u ON p.created_by = u.id
       LEFT JOIN teams t ON p.team_id = t.id
-      WHERE p.workspace_id = ?
+      WHERE p.workspace_id = $1
     `;
 
     const queryParams = [workspace_id];
 
     if (team_id) {
-      query += ' AND p.team_id = ?';
+      query += ' AND p.team_id = $' + (queryParams.length + 1);
       queryParams.push(team_id);
     }
 
     if (status) {
-      query += ' AND p.status = ?';
+      query += ' AND p.status = $' + (queryParams.length + 1);
       queryParams.push(status);
     }
 
@@ -73,7 +73,7 @@ const createProject = async (req, res, next) => {
 
     const [result] = await pool.query(
       `INSERT INTO projects (workspace_id, team_id, name, description, status, color, start_date, due_date, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
       [workspace_id, team_id || null, name.trim(), description || null, status, color, start_date || null, due_date || null, userId]
     );
 
@@ -114,7 +114,7 @@ const getProjectById = async (req, res, next) => {
        FROM projects p
        LEFT JOIN users u ON p.created_by = u.id
        LEFT JOIN teams t ON p.team_id = t.id
-       WHERE p.id = ?`,
+       WHERE p.id = $1`,
       [projectId]
     );
 
@@ -144,7 +144,7 @@ const updateProject = async (req, res, next) => {
     const projectId = req.params.id;
     const { name, description, status, color, team_id, due_date } = req.body;
 
-    const [existing] = await pool.query('SELECT id FROM projects WHERE id = ?', [projectId]);
+    const [existing] = await pool.query('SELECT id FROM projects WHERE id = $1', [projectId]);
     if (existing.length === 0) {
       return res.status(404).json({
         success: false,
@@ -154,13 +154,13 @@ const updateProject = async (req, res, next) => {
 
     await pool.query(
       `UPDATE projects 
-       SET name = COALESCE(?, name),
-           description = COALESCE(?, description),
-           status = COALESCE(?, status),
-           color = COALESCE(?, color),
-           team_id = COALESCE(?, team_id),
-           due_date = COALESCE(?, due_date)
-       WHERE id = ?`,
+       SET name = COALESCE($1, name),
+           description = COALESCE($2, description),
+           status = COALESCE($3, status),
+           color = COALESCE($4, color),
+           team_id = COALESCE($5, team_id),
+           due_date = COALESCE($6, due_date)
+       WHERE id = $7`,
       [name, description, status, color, team_id, due_date, projectId]
     );
 

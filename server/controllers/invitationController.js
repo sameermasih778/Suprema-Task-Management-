@@ -44,7 +44,7 @@ const canManageWorkspace = async (req, workspaceId) => {
   const [rows] = await pool.query(
     `SELECT wm.role
      FROM workspace_members wm
-     WHERE wm.workspace_id = ? AND wm.user_id = ?`,
+     WHERE wm.workspace_id = $1 AND wm.user_id = $2`,
     [workspaceId, req.user.id]
   );
 
@@ -83,7 +83,7 @@ const createInvitation = async (req, res, next) => {
     }
 
     const [workspaceRows] = await pool.query(
-      'SELECT id, name FROM workspaces WHERE id = ?',
+      'SELECT id, name FROM workspaces WHERE id = $1',
       [workspaceId]
     );
     if (workspaceRows.length === 0) {
@@ -92,7 +92,7 @@ const createInvitation = async (req, res, next) => {
     const workspace = workspaceRows[0];
 
     const [users] = await pool.query(
-      'SELECT id, name, email FROM users WHERE email = ?',
+      'SELECT id, name, email FROM users WHERE email = $1',
       [email.trim().toLowerCase()]
     );
     if (users.length === 0) {
@@ -111,7 +111,7 @@ const createInvitation = async (req, res, next) => {
     }
 
     const [alreadyMember] = await pool.query(
-      'SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [workspaceId, invitee.id]
     );
     if (alreadyMember.length > 0) {
@@ -125,7 +125,7 @@ const createInvitation = async (req, res, next) => {
     // invitation rather than stacking up duplicates.
     const [pending] = await pool.query(
       `SELECT id FROM workspace_invitations
-       WHERE workspace_id = ? AND user_id = ? AND status = 'pending'`,
+       WHERE workspace_id = $1 AND user_id = $2 AND status = 'pending'`,
       [workspaceId, invitee.id]
     );
 
@@ -134,20 +134,20 @@ const createInvitation = async (req, res, next) => {
       invitationId = pending[0].id;
       await pool.query(
         `UPDATE workspace_invitations
-         SET role = ?, invited_by = ?, email = ?, created_at = CURRENT_TIMESTAMP
-         WHERE id = ?`,
+         SET role = $1, invited_by = $2, email = $3, created_at = CURRENT_TIMESTAMP
+         WHERE id = $4`,
         [role, req.user.id, invitee.email, invitationId]
       );
     } else {
       const [result] = await pool.query(
         `INSERT INTO workspace_invitations (workspace_id, user_id, email, role, invited_by, status)
-         VALUES (?, ?, ?, ?, ?, 'pending')`,
+         VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING id`,
         [workspaceId, invitee.id, invitee.email, role, req.user.id]
       );
       invitationId = result.insertId;
     }
 
-    const [actor] = await pool.query('SELECT name FROM users WHERE id = ?', [req.user.id]);
+    const [actor] = await pool.query('SELECT name FROM users WHERE id = $1', [req.user.id]);
     const actorName = actor[0]?.name || 'An administrator';
     const roleText = roleLabel(role);
 
@@ -156,7 +156,7 @@ const createInvitation = async (req, res, next) => {
     try {
       await pool.query(
         `INSERT INTO notifications (user_id, title, message, type, is_read, link)
-         VALUES (?, ?, ?, 'invitation', FALSE, ?)`,
+         VALUES ($1, $2, $3, 'invitation', FALSE, $4) RETURNING id`,
         [
           invitee.id,
           `Invitation to join "${workspace.name}"`,
@@ -225,7 +225,7 @@ const getWorkspaceInvitations = async (req, res, next) => {
        FROM workspace_invitations wi
        LEFT JOIN users u ON wi.user_id = u.id
        LEFT JOIN users inviter ON wi.invited_by = inviter.id
-       WHERE wi.workspace_id = ?
+       WHERE wi.workspace_id = $1
        ORDER BY wi.created_at DESC
        LIMIT 100`,
       [workspaceId]
@@ -255,7 +255,7 @@ const getMyInvitations = async (req, res, next) => {
        FROM workspace_invitations wi
        JOIN workspaces w ON wi.workspace_id = w.id
        LEFT JOIN users inviter ON wi.invited_by = inviter.id
-       WHERE wi.user_id = ?
+       WHERE wi.user_id = $1
        ORDER BY wi.status = 'pending' DESC, wi.created_at DESC
        LIMIT 50`,
       [req.user.id]
@@ -294,7 +294,7 @@ const respondToInvitation = async (req, res, next) => {
       `SELECT wi.*, w.name AS workspace_name
        FROM workspace_invitations wi
        JOIN workspaces w ON wi.workspace_id = w.id
-       WHERE wi.id = ?`,
+       WHERE wi.id = $1`,
       [invitationId]
     );
 
@@ -323,16 +323,18 @@ const respondToInvitation = async (req, res, next) => {
 
     if (action === 'accept') {
       // The membership only exists from the moment they accept.
+      // ON CONFLICT covers the case where they were added by another path in
+      // the meantime - the role is then brought up to date.
       await connection.query(
         `INSERT INTO workspace_members (workspace_id, user_id, role)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE role = VALUES(role)`,
+         VALUES ($1, $2, $3)
+         ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role RETURNING id`,
         [invitation.workspace_id, invitation.user_id, invitation.role]
       );
     }
 
     await connection.query(
-      `UPDATE workspace_invitations SET status = ?, responded_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      `UPDATE workspace_invitations SET status = $1, responded_at = CURRENT_TIMESTAMP WHERE id = $2`,
       [action === 'accept' ? 'accepted' : 'rejected', invitationId]
     );
 
@@ -343,7 +345,7 @@ const respondToInvitation = async (req, res, next) => {
     try {
       await pool.query(
         `INSERT INTO notifications (user_id, title, message, type, is_read, link)
-         VALUES (?, ?, ?, 'system', FALSE, ?)`,
+         VALUES ($1, $2, $3, 'system', FALSE, $4) RETURNING id`,
         [
           invitation.invited_by,
           action === 'accept'

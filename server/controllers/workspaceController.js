@@ -11,7 +11,7 @@ const getUserWorkspaces = async (req, res, next) => {
       `SELECT w.id, w.name, w.slug, w.plan, w.status, w.owner_id, w.created_at, wm.role
        FROM workspaces w
        JOIN workspace_members wm ON w.id = wm.workspace_id
-       WHERE wm.user_id = ?
+       WHERE wm.user_id = $1
        ORDER BY w.created_at DESC`,
       [userId]
     );
@@ -49,14 +49,14 @@ const createWorkspace = async (req, res, next) => {
     await connection.beginTransaction();
 
     const [wsResult] = await connection.query(
-      'INSERT INTO workspaces (name, slug, owner_id, plan) VALUES (?, ?, ?, ?)',
+      'INSERT INTO workspaces (name, slug, owner_id, plan) VALUES ($1, $2, $3, $4) RETURNING id',
       [name.trim(), slug, userId, plan]
     );
 
     const workspaceId = wsResult.insertId;
 
     await connection.query(
-      'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, "owner")',
+      "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner') RETURNING id",
       [workspaceId, userId]
     );
 
@@ -97,7 +97,7 @@ const getWorkspaceMembers = async (req, res, next) => {
       `SELECT u.id, u.name, u.email, u.avatar_url, u.role AS global_role, wm.role AS workspace_role, wm.joined_at 
        FROM workspace_members wm 
        JOIN users u ON wm.user_id = u.id 
-       WHERE wm.workspace_id = ? 
+       WHERE wm.workspace_id = $1 
        ORDER BY wm.joined_at ASC`,
       [workspaceId]
     );
@@ -129,7 +129,7 @@ const addWorkspaceMember = async (req, res, next) => {
     }
 
     // Find user by email
-    const [users] = await pool.query('SELECT id, name, email FROM users WHERE email = ?', [email.trim().toLowerCase()]);
+    const [users] = await pool.query('SELECT id, name, email FROM users WHERE email = $1', [email.trim().toLowerCase()]);
     if (users.length === 0) {
       return res.status(404).json({
         success: false,
@@ -141,7 +141,7 @@ const addWorkspaceMember = async (req, res, next) => {
 
     // Check if already in workspace
     const [existing] = await pool.query(
-      'SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [workspaceId, targetUser.id]
     );
 
@@ -153,7 +153,7 @@ const addWorkspaceMember = async (req, res, next) => {
     }
 
     await pool.query(
-      'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)',
+      'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id',
       [workspaceId, targetUser.id, role]
     );
 

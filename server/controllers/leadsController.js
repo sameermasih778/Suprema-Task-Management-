@@ -51,7 +51,7 @@ const getContactMessages = async (req, res, next) => {
     const params = [];
 
     if (status && ['unread', 'read', 'replied'].includes(status)) {
-      sql += ' WHERE status = ?';
+      sql += ' WHERE status = $1';
       params.push(status);
     }
 
@@ -62,8 +62,8 @@ const getContactMessages = async (req, res, next) => {
     const [counts] = await pool.query(
       `SELECT
          COUNT(*) AS total,
-         SUM(status = 'unread') AS unread,
-         SUM(status = 'replied') AS replied
+         COUNT(*) FILTER (WHERE status = 'unread') AS unread,
+         COUNT(*) FILTER (WHERE status = 'replied') AS replied
        FROM contact_messages`
     );
 
@@ -99,7 +99,7 @@ const updateContactStatus = async (req, res, next) => {
     }
 
     const [result] = await pool.query(
-      'UPDATE contact_messages SET status = ? WHERE id = ?',
+      'UPDATE contact_messages SET status = $1 WHERE id = $2',
       [status, id]
     );
 
@@ -131,7 +131,7 @@ const getWaitlistLeads = async (req, res, next) => {
     const params = [];
 
     if (status && ['pending', 'invited', 'active'].includes(status)) {
-      sql += ' WHERE status = ?';
+      sql += ' WHERE status = $1';
       params.push(status);
     }
 
@@ -144,9 +144,9 @@ const getWaitlistLeads = async (req, res, next) => {
     const [counts] = await pool.query(
       `SELECT
          COUNT(*) AS total,
-         SUM(status = 'pending') AS pending,
-         SUM(status = 'invited') AS invited,
-         SUM(status = 'active') AS active
+         COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+         COUNT(*) FILTER (WHERE status = 'invited') AS invited,
+         COUNT(*) FILTER (WHERE status = 'active') AS active
        FROM waitlist_leads`
     );
 
@@ -183,7 +183,7 @@ const updateWaitlistStatus = async (req, res, next) => {
     }
 
     const [result] = await pool.query(
-      'UPDATE waitlist_leads SET status = ? WHERE id = ?',
+      'UPDATE waitlist_leads SET status = $1 WHERE id = $2',
       [status, id]
     );
 

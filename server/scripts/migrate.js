@@ -9,28 +9,32 @@
  * trigger its own startup migration run, so two runners would race and the
  * output would be duplicated/interleaved.
  */
-const mysql = require('mysql2/promise');
+const { Client } = require('pg');
 const path = require('path');
 const dotenv = require('dotenv');
 const { runMigrations } = require('../database/migrate');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const useSsl = /^(1|true|yes)$/i.test(String(process.env.DB_SSL || ''));
-
 (async () => {
   console.log('\n🔧 Running Suprema schema migrations...\n');
 
-  const connection = await mysql.createConnection({
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '3306', 10),
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'suprema_db',
-    ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {})
-  });
+  if (!process.env.DATABASE_URL) {
+    console.error('❌ DATABASE_URL is not set in server/.env');
+    process.exit(1);
+  }
 
-  console.log(`📌 Connected to Database: '${process.env.DB_NAME}' on ${process.env.DB_HOST}:${process.env.DB_PORT}\n`);
+  const connection = new Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 15000
+  });
+  await connection.connect();
+
+  const [[info]] = await connection.query(
+    'SELECT current_database() AS db, current_schema() AS schema'
+  );
+  console.log(`📌 Connected to database '${info.db}', schema '${info.schema}'\n`);
 
   await runMigrations(connection);
 

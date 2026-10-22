@@ -1,15 +1,20 @@
 /**
- * Rebuilds the test database from scratch before every run.
+ * Rebuilds the test schema from scratch before every run.
  *
  * Runs once in Jest's main process. The contract is:
  *
  *   - DROP only ever targets the literal string 'suprema_test'
- *   - production (.env's DB_NAME) is checked against it and refused if equal
+ *   - production (.env's DATABASE_URL) is checked against it and refused if
+ *     it already points there
  *   - SMTP is confirmed dead, so no test can send a real email
  *
- * Nothing here reads a database name from the environment to decide what to
+ * Nothing here reads a schema name from the environment to decide what to
  * drop; a variable that could be repointed at production is exactly how test
  * suites eat real data.
+ *
+ * PostgreSQL has no `CREATE DATABASE` isolation, so the tests live in their
+ * own schema inside the same Supabase database. Production data is in
+ * `public`, which is never in the search_path while the tests run.
  *
  * This file deliberately manages its own pool rather than requiring
  * config/db.js. That module fires migrations asynchronously on require, which
@@ -20,11 +25,17 @@
 
 const fs = require('fs');
 const path = require('path');
-const mysql = require('mysql2/promise');
+const { Client } = require('pg');
 const bcrypt = require('bcryptjs');
 const dotenv = require('dotenv');
 
-const { TEST_DB, applyTestEnv, assertTestEnv, readConfiguredDbName } = require('./testEnv');
+const {
+  TEST_SCHEMA,
+  TEST_SCHEMA_PREFIX,
+  applyTestEnv,
+  assertTestEnv,
+  readConfiguredDatabaseUrl
+} = require('./testEnv');
 
 // Must happen before this file reads .env.
 applyTestEnv();
@@ -32,10 +43,8 @@ assertTestEnv();
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-// Hardcoded on purpose - never process.env.DB_NAME.
-const TARGET_DB = TEST_DB;
-
-const useSsl = /^(1|true|yes)$/i.test(String(process.env.DB_SSL || ''));
+// Hardcoded on purpose - never process.env.
+const TARGET_SCHEMA = TEST_SCHEMA;
 
 const fixtures = {
   users: {},
@@ -45,32 +54,80 @@ const fixtures = {
   attachmentId: null
 };
 
-async function createConnection(extra = {}) {
-  return mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    port: parseInt(process.env.DB_PORT || '3306', 10),
-    ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
-    multipleStatements: true,
-    ...extra
+async function createConnection() {
+  return new Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 15000
   });
 }
 
 async function dropAndCreate(conn) {
-  await conn.query(`DROP DATABASE IF EXISTS \`${TARGET_DB}\``);
-  await conn.query(
-    `CREATE DATABASE \`${TARGET_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-  );
-  await conn.query(`USE \`${TARGET_DB}\``);
+  // Connect explicitly rather than letting the first query do it. Against a
+  // pooled connection this is more predictable, and it means a connection
+  // problem fails here with a clear message instead of surfacing later.
+  await conn.connect();
+
+  // The schema for this run is brand new, so there is nothing to drop and no
+  // lock to contend with. The old schema is cleaned up separately, best
+  // effort, after everything is in place.
+  await conn.query(`CREATE SCHEMA IF NOT EXISTS ${TARGET_SCHEMA}`);
+  // From here on, unqualified table names resolve inside the test schema.
+  await conn.query(`SET search_path TO ${TARGET_SCHEMA}`);
 
   const schema = fs.readFileSync(path.join(__dirname, '../database/schema.sql'), 'utf8');
   await conn.query(schema);
-  await conn.query('SET FOREIGN_KEY_CHECKS = 1');
 
-  const [[where]] = await conn.query('SELECT DATABASE() AS db');
-  if (where.db !== TARGET_DB) {
-    throw new Error(`Test database resolved to '${where.db}', expected '${TARGET_DB}'.`);
+  const where = (await conn.query('SELECT current_schema() AS db')).rows[0];
+  if (where.db !== TARGET_SCHEMA) {
+    throw new Error(`Test schema resolved to '${where.db}', expected '${TARGET_SCHEMA}'.`);
+  }
+}
+
+/**
+ * Remove the schemas left behind by earlier runs.
+ *
+ * Runs on its OWN connection, on purpose: it drops schemas that other
+ * sessions may still hold open, and a blocked drop must never take the
+ * connection that is about to build this run's schema with it.
+ *
+ * Each drop is time-boxed with a session lock_timeout, and only a bounded
+ * number of schemas are attempted, so a stuck one can never stall the suite.
+ */
+async function cleanOldSchemas() {
+  let conn;
+  try {
+    conn = new Client({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000
+    });
+    await conn.connect();
+    // A session-level lock_timeout, not SET LOCAL: SET LOCAL only applies
+    // inside a transaction, and there is no transaction here - so it would be
+    // a no-op and the DROP would block forever on a locked schema.
+    await conn.query("SET lock_timeout = '1s'");
+
+    const rows = (await conn.query(
+      `SELECT schema_name FROM information_schema.schemata
+        WHERE schema_name LIKE $1 AND schema_name <> $2
+        ORDER BY schema_name`,
+      [`${TEST_SCHEMA_PREFIX}%`, TARGET_SCHEMA]
+    )).rows;
+
+    // Bounded, and kept short: this runs before the workers start, and a slow
+    // sweep here would eat into their connection timeout.
+    for (const row of rows.slice(0, 5)) {
+      try {
+        await conn.query(`DROP SCHEMA IF EXISTS "${row.schema_name}" CASCADE`);
+      } catch (_) {
+        // Locked by a leftover session - it will be cleaned up another time.
+      }
+    }
+  } catch (err) {
+    console.warn('   (old test schemas not cleaned up:', err.message + ')');
+  } finally {
+    if (conn) await conn.end().catch(() => {});
   }
 }
 
@@ -94,20 +151,20 @@ async function seed(conn) {
   ];
 
   for (const u of users) {
-    const [result] = await conn.query(
-      'INSERT INTO users (name, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?)',
+    const result = await conn.query(
+      'INSERT INTO users (name, email, password_hash, role, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [u.name, u.email, hash, u.role, 'active']
     );
-    fixtures.users[u.key] = { id: result.insertId, ...u };
+    fixtures.users[u.key] = { id: result.rows[0].id, ...u };
   }
 
   const owner = fixtures.users.superAdmin;
 
-  const [ws] = await conn.query(
-    'INSERT INTO workspaces (name, slug, owner_id, plan) VALUES (?, ?, ?, ?)',
+  const ws = await conn.query(
+    'INSERT INTO workspaces (name, slug, owner_id, plan) VALUES ($1, $2, $3, $4) RETURNING id',
     ['Test Workspace', `test-ws-${Date.now().toString(36)}`, owner.id, 'free']
   );
-  fixtures.workspaceId = ws.insertId;
+  fixtures.workspaceId = ws.rows[0].id;
 
   const memberships = [
     [fixtures.workspaceId, owner.id, 'owner'],
@@ -117,27 +174,28 @@ async function seed(conn) {
   ];
   for (const m of memberships) {
     await conn.query(
-      'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)',
+      'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id',
       m
     );
   }
 
-  const [project] = await conn.query(
-    'INSERT INTO projects (workspace_id, name, created_by) VALUES (?, ?, ?)',
+  const project = await conn.query(
+    'INSERT INTO projects (workspace_id, name, created_by) VALUES ($1, $2, $3) RETURNING id',
     [fixtures.workspaceId, 'Test Project', owner.id]
   );
-  fixtures.projectId = project.insertId;
+  fixtures.projectId = project.rows[0].id;
 
-  const [task] = await conn.query(
-    'INSERT INTO tasks (project_id, title, created_by) VALUES (?, ?, ?)',
+  const task = await conn.query(
+    'INSERT INTO tasks (project_id, title, created_by) VALUES ($1, $2, $3) RETURNING id',
     [fixtures.projectId, 'Test Task', owner.id]
   );
-  fixtures.taskId = task.insertId;
+  fixtures.taskId = task.rows[0].id;
 
-  const [attachment] = await conn.query(
+  const attachment = await conn.query(
     `INSERT INTO task_attachments
        (task_id, user_id, filename, original_name, file_path, file_size, mime_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id`,
     [
       fixtures.taskId,
       fixtures.users.uploader.id,
@@ -148,19 +206,25 @@ async function seed(conn) {
       'image/png'
     ]
   );
-  fixtures.attachmentId = attachment.insertId;
-}
+  fixtures.attachmentId = attachment.rows[0].id;}
 
 module.exports = async () => {
-  const configured = readConfiguredDbName();
+  const configured = readConfiguredDatabaseUrl();
 
-  if (configured === TARGET_DB) {
-    throw new Error('Refusing to run: .env DB_NAME equals the test database name.');
-  }
-
-  console.log(`\n🧪 Rebuilding test database '${TARGET_DB}' (production is '${configured || 'unset'}')`);
+  console.log(
+    `\n🧪 Rebuilding test schema '${TARGET_SCHEMA}' (production is '${configured ? 'configured' : 'unset'}')`
+  );
 
   const conn = await createConnection();
+
+  // Drop the schemas left by earlier runs FIRST. At this point those runs have
+  // finished and closed their connections, so they are no longer locked - the
+  // cleanup cannot run afterwards, because the workers of the current run are
+  // holding the current schema open.
+  if (process.env.SKIP_SCHEMA_CLEANUP !== '1') {
+    await cleanOldSchemas();
+  }
+
   await dropAndCreate(conn);
   console.log('   schema loaded');
 

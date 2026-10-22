@@ -25,7 +25,8 @@ const createAttachment = async (uploaderId) => {
   const [result] = await pool.query(
     `INSERT INTO task_attachments
        (task_id, user_id, filename, original_name, file_path, file_size, mime_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id`,
     [F.taskId, uploaderId, 'probe.png', 'probe.png', 'https://example.invalid/probe.png', 1024, 'image/png']
   );
   return result.insertId;
@@ -90,9 +91,9 @@ describe('DELETE /attachments/:id - only the right people delete files', () => {
     expect(res.status).toBe(401);
 
     // Still there.
-    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = $1', [id]);
     expect(rows).toHaveLength(1);
-    await pool.query('DELETE FROM task_attachments WHERE id = ?', [id]);
+    await pool.query('DELETE FROM task_attachments WHERE id = $1', [id]);
   });
 
   test('returns 404 for an attachment that does not exist', async () => {
@@ -112,10 +113,10 @@ describe('DELETE /attachments/:id - only the right people delete files', () => {
     expect(res.status).toBe(403);
     expect(res.body.message).toMatch(/only delete attachments that you uploaded/i);
 
-    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = $1', [id]);
     expect(rows).toHaveLength(1);
 
-    await pool.query('DELETE FROM task_attachments WHERE id = ?', [id]);
+    await pool.query('DELETE FROM task_attachments WHERE id = $1', [id]);
   });
 
   test('allows the uploader', async () => {
@@ -127,7 +128,7 @@ describe('DELETE /attachments/:id - only the right people delete files', () => {
 
     expect(res.status).toBe(200);
 
-    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = $1', [id]);
     expect(rows).toHaveLength(0);
   });
 
@@ -140,7 +141,7 @@ describe('DELETE /attachments/:id - only the right people delete files', () => {
 
     expect(res.status).toBe(200);
 
-    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = $1', [id]);
     expect(rows).toHaveLength(0);
   });
 
@@ -153,7 +154,7 @@ describe('DELETE /attachments/:id - only the right people delete files', () => {
 
     expect(res.status).toBe(200);
 
-    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT id FROM task_attachments WHERE id = $1', [id]);
     expect(rows).toHaveLength(0);
   });
 });

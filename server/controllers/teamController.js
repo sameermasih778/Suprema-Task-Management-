@@ -27,7 +27,7 @@ const getTeams = async (req, res, next) => {
       `SELECT t.id, t.workspace_id, t.name, t.description, t.created_by, t.created_at,
               (SELECT COUNT(*) FROM team_members tm WHERE tm.team_id = t.id) AS member_count
        FROM teams t 
-       WHERE t.workspace_id = ? 
+       WHERE t.workspace_id = $1 
        ORDER BY t.created_at DESC`,
       [workspace_id]
     );
@@ -57,7 +57,7 @@ const getMyTeams = async (req, res, next) => {
        FROM team_members tm
        JOIN teams t ON tm.team_id = t.id
        JOIN workspaces w ON t.workspace_id = w.id
-       WHERE tm.user_id = ?
+       WHERE tm.user_id = $1
        ORDER BY t.created_at DESC`,
       [req.user.id]
     );
@@ -89,7 +89,7 @@ const createTeam = async (req, res, next) => {
     }
 
     const [result] = await pool.query(
-      'INSERT INTO teams (workspace_id, name, description, created_by) VALUES (?, ?, ?, ?)',
+      'INSERT INTO teams (workspace_id, name, description, created_by) VALUES ($1, $2, $3, $4) RETURNING id',
       [workspace_id, name.trim(), description || null, userId]
     );
 
@@ -97,7 +97,7 @@ const createTeam = async (req, res, next) => {
 
     // Automatically add creator as team leader
     await pool.query(
-      'INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, "leader")',
+      "INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'leader') RETURNING id",
       [teamId, userId]
     );
 
@@ -141,7 +141,7 @@ const getTeamMembers = async (req, res, next) => {
               u.role AS global_role
        FROM team_members tm
        JOIN users u ON tm.user_id = u.id
-       WHERE tm.team_id = ?
+       WHERE tm.team_id = $1
        ORDER BY tm.joined_at ASC`,
       [teamId]
     );
@@ -174,7 +174,7 @@ const addTeamMember = async (req, res, next) => {
 
     const [teamRows] = await pool.query(
       `SELECT t.workspace_id, t.name, t.created_by, w.name AS workspace_name
-       FROM teams t JOIN workspaces w ON t.workspace_id = w.id WHERE t.id = ?`,
+       FROM teams t JOIN workspaces w ON t.workspace_id = w.id WHERE t.id = $1`,
       [teamId]
     );
     if (teamRows.length === 0) {
@@ -192,7 +192,7 @@ const addTeamMember = async (req, res, next) => {
     }
 
     const [existing] = await pool.query(
-      'SELECT id FROM team_members WHERE team_id = ? AND user_id = ?',
+      'SELECT id FROM team_members WHERE team_id = $1 AND user_id = $2',
       [teamId, user_id]
     );
 
@@ -204,7 +204,7 @@ const addTeamMember = async (req, res, next) => {
     }
 
     await pool.query(
-      'INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)',
+      'INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3) RETURNING id',
       [teamId, user_id, role]
     );
 
@@ -213,12 +213,12 @@ const addTeamMember = async (req, res, next) => {
     // deliberately isolated and never throws.
     if (Number(user_id) !== req.user.id) {
       try {
-        const [addedUser] = await pool.query('SELECT name FROM users WHERE id = ?', [user_id]);
-        const [actor] = await pool.query('SELECT name FROM users WHERE id = ?', [req.user.id]);
+        const [addedUser] = await pool.query('SELECT name FROM users WHERE id = $1', [user_id]);
+        const [actor] = await pool.query('SELECT name FROM users WHERE id = $1', [req.user.id]);
         const roleLabel = role === 'leader' ? 'Team Leader' : 'Member';
         await pool.query(
           `INSERT INTO notifications (user_id, title, message, type, is_read, link)
-           VALUES (?, ?, ?, 'system', FALSE, ?)`,
+           VALUES ($1, $2, $3, 'system', FALSE, $4) RETURNING id`,
           [
             user_id,
             `Added to team "${teamRows[0].name}"`,
@@ -257,7 +257,7 @@ const removeTeamMember = async (req, res, next) => {
   try {
     const { id: teamId, userId } = req.params;
 
-    const [teamRows] = await pool.query('SELECT id, workspace_id, name, created_by FROM teams WHERE id = ?', [teamId]);
+    const [teamRows] = await pool.query('SELECT id, workspace_id, name, created_by FROM teams WHERE id = $1', [teamId]);
     if (teamRows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -273,7 +273,7 @@ const removeTeamMember = async (req, res, next) => {
     }
 
     await pool.query(
-      'DELETE FROM team_members WHERE team_id = ? AND user_id = ?',
+      'DELETE FROM team_members WHERE team_id = $1 AND user_id = $2',
       [teamId, userId]
     );
 
@@ -303,7 +303,7 @@ const deleteTeam = async (req, res, next) => {
   try {
     const teamId = req.params.id;
 
-    const [teamRows] = await pool.query('SELECT id, workspace_id, name, created_by FROM teams WHERE id = ?', [teamId]);
+    const [teamRows] = await pool.query('SELECT id, workspace_id, name, created_by FROM teams WHERE id = $1', [teamId]);
     if (teamRows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -318,7 +318,7 @@ const deleteTeam = async (req, res, next) => {
       });
     }
 
-    await pool.query('DELETE FROM teams WHERE id = ?', [teamId]);
+    await pool.query('DELETE FROM teams WHERE id = $1', [teamId]);
 
     await logActivity({
       workspace_id: teamRows[0].workspace_id,

@@ -29,16 +29,22 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  // One statement per id: node-postgres sends a JavaScript array as several
+  // bind parameters, which does not fit a single $1 placeholder.
   if (createdTaskIds.length) {
-    await pool.query(
-      `DELETE FROM activity_logs WHERE entity_type = 'task' AND entity_id IN (?)`,
-      [createdTaskIds]
-    );
-    await pool.query('DELETE FROM tasks WHERE id IN (?)', [createdTaskIds]);
+    for (const id of createdTaskIds) {
+      await pool.query(
+        `DELETE FROM activity_logs WHERE entity_type = 'task' AND entity_id = $1`,
+        [id]
+      );
+      await pool.query('DELETE FROM tasks WHERE id = $1', [id]);
+    }
     createdTaskIds.length = 0;
   }
   if (createdNotificationIds.length) {
-    await pool.query('DELETE FROM notifications WHERE id IN (?)', [createdNotificationIds]);
+    for (const id of createdNotificationIds) {
+      await pool.query('DELETE FROM notifications WHERE id = $1', [id]);
+    }
     createdNotificationIds.length = 0;
   }
 });
@@ -61,7 +67,7 @@ describe('POST /api/v1/tasks - assignment notification', () => {
     const [rows] = await pool.query(
       `SELECT n.user_id, n.title, n.message, n.type, n.link
        FROM notifications n
-       WHERE n.user_id = ? AND n.type = 'task_assigned' AND n.link = ?`,
+       WHERE n.user_id = $1 AND n.type = 'task_assigned' AND n.link = $2`,
       [F.developer.id, `/dashboard/tasks?task=${task.id}`]
     );
 
@@ -76,8 +82,8 @@ describe('POST /api/v1/tasks - assignment notification', () => {
 
     const [rows] = await pool.query(
       `SELECT id FROM notifications
-       WHERE user_id = ? AND type = 'task_assigned'
-         AND created_at > (NOW() - INTERVAL 1 MINUTE)`,
+       WHERE user_id = $1 AND type = 'task_assigned'
+         AND created_at > (NOW() - INTERVAL '1 minute')`,
       [F.member.id]
     );
 
@@ -96,7 +102,7 @@ describe('POST /api/v1/tasks - assignment notification', () => {
 
     const [rows] = await pool.query(
       `SELECT n.user_id, n.link FROM notifications n
-       WHERE n.type = 'task_assigned' AND n.link = ?`,
+       WHERE n.type = 'task_assigned' AND n.link = $1`,
       [`/dashboard/tasks?task=${task.id}`]
     );
 
@@ -114,7 +120,7 @@ describe('POST /api/v1/tasks - assignment notification', () => {
 
     const [rows] = await pool.query(
       `SELECT id FROM notifications
-       WHERE user_id = ? AND type = 'task_assigned' AND link = ?`,
+       WHERE user_id = $1 AND type = 'task_assigned' AND link = $2`,
       [F.developer.id, `/dashboard/tasks?task=${task.id}`]
     );
 

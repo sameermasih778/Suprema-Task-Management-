@@ -129,4 +129,33 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   });
 }
 
+/**
+ * Close the database pool on shutdown.
+ *
+ * This matters more than it looks with a pooled database. nodemon restarts the
+ * server on every file change during development, and a process that exits
+ * without closing its pool leaves the connection pooler holding those server
+ * connections until it reaps them. After a few dozen restarts the pooler is
+ * saturated, new connections queue behind the stale ones, and every query
+ * times out. Closing the pool makes a restart release its connections
+ * immediately.
+ */
+let shuttingDown = false;
+const shutdown = async (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} received - closing the database pool...`);
+  try {
+    const pool = require('./config/db');
+    await pool.end();
+    console.log('✅ Database pool closed');
+  } catch (err) {
+    console.warn('⚠️  Could not close the database pool:', err.message);
+  }
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 module.exports = app;

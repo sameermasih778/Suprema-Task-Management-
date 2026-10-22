@@ -6,8 +6,9 @@ const errorHandler = (err, req, res, next) => {
     console.error(err.stack);
   }
 
-  // Handle specific database errors
-  if (err.code === 'ER_DUP_ENTRY') {
+  // Handle specific database errors.
+  // PostgreSQL error codes: 23505 = unique_violation, 23503 = foreign_key_violation.
+  if (err.code === '23505') {
     return res.status(409).json({
       success: false,
       message: 'A record with this information already exists.',
@@ -15,7 +16,7 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
-  if (err.code === 'ER_NO_REFERENCED_ROW_2') {
+  if (err.code === '23503') {
     return res.status(400).json({
       success: false,
       message: 'Referenced foreign key entity does not exist.',

@@ -135,7 +135,7 @@ const updateUserRole = async (req, res, next) => {
     const isSelf = targetUserId === req.user.id;
 
     const [result] = await pool.query(
-      'UPDATE users SET role = ? WHERE id = ?',
+      'UPDATE users SET role = $1 WHERE id = $2',
       [role, targetUserId]
     );
 
@@ -148,7 +148,7 @@ const updateUserRole = async (req, res, next) => {
 
     if (isSelf) {
       const [[userRow]] = await pool.query(
-        'SELECT id, name, email, role, status, avatar_url FROM users WHERE id = ?',
+        'SELECT id, name, email, role, status, avatar_url FROM users WHERE id = $1',
         [targetUserId]
       );
       if (userRow) {
@@ -217,7 +217,7 @@ const updateUserStatus = async (req, res, next) => {
 
     // Fetch target so we can protect Super Admin accounts from lower roles
     const [users] = await pool.query(
-      'SELECT id, name, role, status FROM users WHERE id = ?',
+      'SELECT id, name, role, status FROM users WHERE id = $1',
       [id]
     );
 
@@ -235,7 +235,7 @@ const updateUserStatus = async (req, res, next) => {
     }
 
     const [result] = await pool.query(
-      'UPDATE users SET status = ? WHERE id = ?',
+      'UPDATE users SET status = $1 WHERE id = $2',
       [status, id]
     );
 
@@ -290,7 +290,7 @@ const resetUserPassword = async (req, res, next) => {
     }
 
     const [users] = await pool.query(
-      'SELECT id, name, email FROM users WHERE id = ?',
+      'SELECT id, name, email FROM users WHERE id = $1',
       [id]
     );
 
@@ -307,14 +307,14 @@ const resetUserPassword = async (req, res, next) => {
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
     await pool.query(
-      'UPDATE users SET password_hash = ? WHERE id = ?',
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
       [hashedPassword, user.id]
     );
 
     // Audit trail: who changed whose password, and in which mode.
     try {
       const [wsRows] = await pool.query(
-        'SELECT workspace_id FROM workspace_members WHERE user_id = ? LIMIT 1',
+        'SELECT workspace_id FROM workspace_members WHERE user_id = $1 LIMIT 1',
         [req.user.id]
       );
       await logActivity({
@@ -406,7 +406,7 @@ const deleteUser = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
     }
 
-    const [result] = await pool.query('DELETE FROM users WHERE id = ?', [id]);
+    const [result] = await pool.query('DELETE FROM users WHERE id = $1', [id]);
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ success: false, message: 'User not found' });
@@ -480,7 +480,11 @@ const broadcastNotification = async (req, res, next) => {
     // Resolve recipients, ignoring any ids that do not exist.
     let recipients;
     if (targetIds && targetIds.length > 0) {
-      const placeholders = targetIds.map(() => '?').join(',');
+      // PostgreSQL placeholders are numbered, so each id gets its own $n
+      // rather than a row of '?'. The '$' is concatenated rather than written
+      // as '$$' because '$$' in a template literal is two literal dollars,
+      // not an escaped one - which would produce "$$1" and a syntax error.
+      const placeholders = targetIds.map((_, i) => '$' + (i + 1)).join(',');
       const [found] = await pool.query(
         `SELECT id, name, email FROM users WHERE id IN (${placeholders})`,
         targetIds
@@ -512,7 +516,7 @@ const broadcastNotification = async (req, res, next) => {
 
     const values = recipients.map((u) => [u.id, title, message, type, false, link]);
     await connection.query(
-      'INSERT INTO notifications (user_id, title, message, type, is_read, link) VALUES ?',
+      'INSERT INTO notifications (user_id, title, message, type, is_read, link) VALUES $1 RETURNING id',
       [values]
     );
 

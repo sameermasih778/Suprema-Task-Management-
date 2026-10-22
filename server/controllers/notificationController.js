@@ -9,7 +9,7 @@ const getUserNotifications = async (req, res, next) => {
     const userId = req.user.id;
 
     const [notifications] = await pool.query(
-      'SELECT id, title, message, type, is_read, link, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
+      'SELECT id, title, message, type, is_read, link, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
       [userId]
     );
 
@@ -36,7 +36,7 @@ const markAsRead = async (req, res, next) => {
     const userId = req.user.id;
 
     await pool.query(
-      'UPDATE notifications SET is_read = TRUE WHERE id = ? AND user_id = ?',
+      'UPDATE notifications SET is_read = TRUE WHERE id = $1 AND user_id = $2',
       [notificationId, userId]
     );
 
@@ -58,7 +58,7 @@ const markAllAsRead = async (req, res, next) => {
     const userId = req.user.id;
 
     await pool.query(
-      'UPDATE notifications SET is_read = TRUE WHERE user_id = ?',
+      'UPDATE notifications SET is_read = TRUE WHERE user_id = $1',
       [userId]
     );
 

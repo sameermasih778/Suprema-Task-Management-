@@ -129,7 +129,7 @@ describe('POST /waitlist - queue positions', () => {
     expect(again.body.position).toBe(first.body.position);
 
     const [[row]] = await pool.query(
-      'SELECT COUNT(*) AS c FROM waitlist_leads WHERE email = ?',
+      'SELECT COUNT(*) AS c FROM waitlist_leads WHERE email = $1',
       [email]
     );
     expect(row.c).toBe(1);
@@ -234,15 +234,15 @@ describe('CSV export', () => {
  */
 test('cleans up every row this file created', async () => {
   // Everything carries a unique marker in its email.
-  await pool.query('DELETE FROM contact_messages WHERE email LIKE ?', [`%${marker}%`]);
-  await pool.query('DELETE FROM waitlist_leads WHERE email LIKE ?', [`%${marker}%`]);
+  await pool.query('DELETE FROM contact_messages WHERE email LIKE $1', [`%${marker}%`]);
+  await pool.query('DELETE FROM waitlist_leads WHERE email LIKE $1', [`%${marker}%`]);
 
   const [[contacts]] = await pool.query(
-    'SELECT COUNT(*) AS c FROM contact_messages WHERE email LIKE ?',
+    'SELECT COUNT(*) AS c FROM contact_messages WHERE email LIKE $1',
     [`%${marker}%`]
   );
   const [[waitlist]] = await pool.query(
-    'SELECT COUNT(*) AS c FROM waitlist_leads WHERE email LIKE ?',
+    'SELECT COUNT(*) AS c FROM waitlist_leads WHERE email LIKE $1',
     [`%${marker}%`]
   );
   expect(contacts.c).toBe(0);

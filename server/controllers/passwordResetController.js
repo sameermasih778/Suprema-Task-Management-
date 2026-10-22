@@ -65,7 +65,7 @@ const requestPasswordReset = async (req, res, next) => {
       });
     }
 
-    const [users] = await pool.query('SELECT id, email, name, status FROM users WHERE email = ?', [email]);
+    const [users] = await pool.query('SELECT id, email, name, status FROM users WHERE email = $1', [email]);
     const user = users[0];
 
     let delivery = { sent: false, isDevMode: true };
@@ -78,10 +78,10 @@ const requestPasswordReset = async (req, res, next) => {
 
       // Invalidate anything outstanding so only the newest link works, then
       // issue the new one.
-      await pool.query('DELETE FROM password_reset_tokens WHERE user_id = ?', [user.id]);
+      await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
       await pool.query(
         `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
-         VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+         VALUES ($1, $2, NOW() + ($3 || ' minutes')::interval) RETURNING id`,
         [user.id, tokenHash, RESET_TOKEN_TTL_MINUTES]
       );
 
@@ -92,7 +92,7 @@ const requestPasswordReset = async (req, res, next) => {
     } else {
       // No user, or a suspended account. Still do comparable work so the
       // response time does not reveal which case it was.
-      await pool.query('SELECT 1 FROM users WHERE email = ?', [email]);
+      await pool.query('SELECT 1 FROM users WHERE email = $1', [email]);
     }
 
     // Identical response either way - this is the whole point.
@@ -125,7 +125,7 @@ const verifyResetToken = async (req, res, next) => {
     const [rows] = await pool.query(
       `SELECT id, expires_at, used_at, (expires_at > NOW()) AS is_valid
          FROM password_reset_tokens
-        WHERE token_hash = ?`,
+        WHERE token_hash = $1`,
       [sha256(token)]
     );
 
@@ -143,10 +143,10 @@ const verifyResetToken = async (req, res, next) => {
       });
     }
 
-    // Expiry is decided by MySQL against its own clock, never in Node. Aiven
-    // stores DATETIME in UTC, mysql2 hands it back as a plain string, and Node
-    // would read that string as LOCAL time - which in a non-UTC timezone reports
-    // a token as expired the instant it is issued. The signup OTP flow already
+    // Expiry is decided by the DATABASE against its own clock, never in Node.
+    // That matters: the timestamp is read as an absolute instant (TIMESTAMPTZ),
+    // so there is no local-timezone reading to get wrong, and a token can
+    // never look expired the instant it is issued. The signup OTP flow
     // compares this way for exactly the same reason.
     if (!record.is_valid) {
       return res.status(400).json({
@@ -186,7 +186,7 @@ const resetPassword = async (req, res, next) => {
       `SELECT prt.id, prt.user_id, prt.expires_at, prt.used_at,
               (prt.expires_at > NOW()) AS is_valid
          FROM password_reset_tokens prt
-        WHERE prt.token_hash = ?`,
+        WHERE prt.token_hash = $1`,
       [sha256(token)]
     );
 
@@ -220,7 +220,7 @@ const resetPassword = async (req, res, next) => {
     // only one can mark used_at first (affectedRows check below), so a token
     // can never be spent twice.
     const [claim] = await pool.query(
-      'UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ? AND used_at IS NULL',
+      'UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1 AND used_at IS NULL',
       [record.id]
     );
 
@@ -231,7 +231,7 @@ const resetPassword = async (req, res, next) => {
       });
     }
 
-    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, record.user_id]);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, record.user_id]);
 
     console.log(`[Auth] Password reset completed for user ${record.user_id}`);
 

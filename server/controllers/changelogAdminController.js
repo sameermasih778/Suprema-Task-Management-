@@ -146,8 +146,9 @@ const createChangelog = async (req, res, next) => {
     const tagId = String(body.tagId || body.tag_id).trim();
 
     // tag_id is UNIQUE, so check first to return a clear message instead of a
-    // raw ER_DUP_ENTRY bubbling through as a 500.
-    const [existing] = await pool.query('SELECT id FROM changelogs WHERE tag_id = ?', [tagId]);
+    // raw unique-violation bubbling through as a 500. PostgreSQL reports that
+    // as error code 23505.
+    const [existing] = await pool.query('SELECT id FROM changelogs WHERE tag_id = $1', [tagId]);
     if (existing.length > 0) {
       return res.status(409).json({
         success: false,
@@ -166,7 +167,7 @@ const createChangelog = async (req, res, next) => {
       `INSERT INTO changelogs
          (tag_id, date, release_date, badge, badge_color, title, description,
           sub_item_title, sub_item_description, tag, banner_title, bullets, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
       [
         tagId,
         label,
@@ -206,7 +207,7 @@ const updateChangelog = async (req, res, next) => {
       return res.status(400).json({ success: false, message: invalid });
     }
 
-    const [existing] = await pool.query('SELECT id FROM changelogs WHERE tag_id = ?', [tagId]);
+    const [existing] = await pool.query('SELECT id FROM changelogs WHERE tag_id = $1', [tagId]);
     if (existing.length === 0) {
       return res.status(404).json({
         success: false,
@@ -220,10 +221,10 @@ const updateChangelog = async (req, res, next) => {
 
     await pool.query(
       `UPDATE changelogs SET
-         date = ?, release_date = ?, badge = ?, badge_color = ?, title = ?, description = ?,
-         sub_item_title = ?, sub_item_description = ?, tag = ?, banner_title = ?,
-         bullets = ?, note = ?
-       WHERE tag_id = ?`,
+         date = $1, release_date = $2, badge = $3, badge_color = $4, title = $5, description = $6,
+         sub_item_title = $7, sub_item_description = $8, tag = $9, banner_title = $10,
+         bullets = $11, note = $12
+       WHERE tag_id = $13`,
       [
         label,
         releaseDate,
@@ -257,7 +258,7 @@ const deleteChangelog = async (req, res, next) => {
   try {
     const { tagId } = req.params;
 
-    const [result] = await pool.query('DELETE FROM changelogs WHERE tag_id = ?', [tagId]);
+    const [result] = await pool.query('DELETE FROM changelogs WHERE tag_id = $1', [tagId]);
 
     if (result.affectedRows === 0) {
       return res.status(404).json({

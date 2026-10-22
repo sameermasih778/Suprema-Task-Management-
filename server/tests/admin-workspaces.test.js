@@ -27,11 +27,15 @@ beforeAll(async () => {
 
 afterEach(async () => {
   if (createdWorkspaceIds.length) {
-    await pool.query('DELETE FROM workspaces WHERE id IN (?)', [createdWorkspaceIds]);
+    for (const id of createdWorkspaceIds) {
+      await pool.query('DELETE FROM workspaces WHERE id = $1', [id]);
+    }
     createdWorkspaceIds.length = 0;
   }
   if (createdUserIds.length) {
-    await pool.query('DELETE FROM users WHERE id IN (?)', [createdUserIds]);
+    for (const id of createdUserIds) {
+      await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    }
     createdUserIds.length = 0;
   }
 });
@@ -52,7 +56,7 @@ const createUser = async () => {
   const bcrypt = require('bcryptjs');
   const hash = await bcrypt.hash('TestPass123!', 4);
   const [result] = await pool.query(
-    'INSERT INTO users (name, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO users (name, email, password_hash, role, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
     ['Workspace Owner', email, hash, 'member', 'active']
   );
   createdUserIds.push(result.insertId);
@@ -94,7 +98,7 @@ describe('POST /api/v1/admin/workspaces', () => {
     expect(res.body.workspace.status).toBe('active');
 
     const [rows] = await pool.query(
-      'SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [res.body.workspace.id, F.admin.id]
     );
     expect(rows).toHaveLength(1);
@@ -116,13 +120,13 @@ describe('POST /api/v1/admin/workspaces', () => {
 
     // They are NOT a member until they accept.
     const [members] = await pool.query(
-      'SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [res.body.workspace.id, owner.id]
     );
     expect(members).toHaveLength(0);
 
     const [invites] = await pool.query(
-      'SELECT role, status FROM workspace_invitations WHERE id = ?',
+      'SELECT role, status FROM workspace_invitations WHERE id = $1',
       [res.body.workspace.invitation_id]
     );
     expect(invites[0].status).toBe('pending');
@@ -164,12 +168,12 @@ describe('archiving a workspace', () => {
       .set(adminToken);
     expect(archive.status).toBe(200);
 
-    const [rows] = await pool.query('SELECT status FROM workspaces WHERE id = ?', [ws.id]);
+    const [rows] = await pool.query('SELECT status FROM workspaces WHERE id = $1', [ws.id]);
     expect(rows[0].status).toBe('archived');
 
     // The data is still there.
     const [members] = await pool.query(
-      'SELECT id FROM workspace_members WHERE workspace_id = ?',
+      'SELECT id FROM workspace_members WHERE workspace_id = $1',
       [ws.id]
     );
     expect(members.length).toBeGreaterThan(0);
@@ -184,7 +188,7 @@ describe('archiving a workspace', () => {
       .set(adminToken);
     expect(restore.status).toBe(200);
 
-    const [after] = await pool.query('SELECT status FROM workspaces WHERE id = ?', [ws.id]);
+    const [after] = await pool.query('SELECT status FROM workspaces WHERE id = $1', [ws.id]);
     expect(after[0].status).toBe('active');
   });
 
@@ -232,7 +236,7 @@ describe('DELETE /api/v1/admin/workspaces/:id', () => {
       .send({ confirm: ws.name });
     expect(right.status).toBe(200);
 
-    const [rows] = await pool.query('SELECT id FROM workspaces WHERE id = ?', [ws.id]);
+    const [rows] = await pool.query('SELECT id FROM workspaces WHERE id = $1', [ws.id]);
     expect(rows).toHaveLength(0);
   });
 
@@ -246,7 +250,7 @@ describe('DELETE /api/v1/admin/workspaces/:id', () => {
 
     expect(res.status).toBe(403);
 
-    const [rows] = await pool.query('SELECT id FROM workspaces WHERE id = ?', [ws.id]);
+    const [rows] = await pool.query('SELECT id FROM workspaces WHERE id = $1', [ws.id]);
     expect(rows).toHaveLength(1);
   });
 
@@ -262,7 +266,7 @@ describe('DELETE /api/v1/admin/workspaces/:id', () => {
     const wsId = res.body.workspace.id;
 
     const [ownerRows] = await pool.query(
-      'SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [wsId, F.superAdmin.id]
     );
     expect(ownerRows[0].role).toBe('owner');
@@ -273,7 +277,7 @@ describe('DELETE /api/v1/admin/workspaces/:id', () => {
       .send({ confirm: res.body.workspace.name });
     expect(del.status).toBe(200);
 
-    const [rows] = await pool.query('SELECT id FROM workspaces WHERE id = ?', [wsId]);
+    const [rows] = await pool.query('SELECT id FROM workspaces WHERE id = $1', [wsId]);
     expect(rows).toHaveLength(0);
   });
 
@@ -281,21 +285,21 @@ describe('DELETE /api/v1/admin/workspaces/:id', () => {
     // Take the super admin down to exactly one workspace for the duration of
     // this test, so the guard is exercised for real rather than assumed.
     const [all] = await pool.query(
-      'SELECT workspace_id, role FROM workspace_members WHERE user_id = ?',
+      'SELECT workspace_id, role FROM workspace_members WHERE user_id = $1',
       [F.superAdmin.id]
     );
     const keep = all[0];
     const removed = all.filter((m) => m.workspace_id !== keep.workspace_id);
 
     for (const r of removed) {
-      await pool.query('DELETE FROM workspace_members WHERE user_id = ? AND workspace_id = ?', [
+      await pool.query('DELETE FROM workspace_members WHERE user_id = $1 AND workspace_id = $2', [
         F.superAdmin.id,
         r.workspace_id
       ]);
     }
 
     try {
-      const [wsRows] = await pool.query('SELECT name FROM workspaces WHERE id = ?', [
+      const [wsRows] = await pool.query('SELECT name FROM workspaces WHERE id = $1', [
         keep.workspace_id
       ]);
 
@@ -309,7 +313,7 @@ describe('DELETE /api/v1/admin/workspaces/:id', () => {
     } finally {
       for (const r of removed) {
         await pool.query(
-          'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)',
+          'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id',
           [r.workspace_id, F.superAdmin.id, r.role]
         );
       }

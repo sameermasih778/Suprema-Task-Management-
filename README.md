@@ -1,6 +1,6 @@
 # Suprema
 
-**A full-stack task & project management SaaS platform** — a React + Vite front end, a Node.js/Express REST API, and a MySQL database, deployed to the cloud.
+**A full-stack task & project management SaaS platform** — a React + Vite front end, a Node.js/Express REST API, and a Supabase (PostgreSQL) database, deployed to the cloud.
 
 Built as " KhawajaLabs Project ".
 
@@ -8,7 +8,8 @@ Built as " KhawajaLabs Project ".
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" />
   <img alt="Vite 8" src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" />
   <img alt="Node.js + Express" src="https://img.shields.io/badge/Node.js-Express-339933?logo=nodedotjs&logoColor=white" />
-  <img alt="MySQL 8" src="https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white" />
+  <img alt="Supabase" src="https://img.shields.io/badge/Supabase-3ECF8E?logo=supabase&logoColor=white" />
+  <img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white" />
   <img alt="TailwindCSS 3" src="https://img.shields.io/badge/TailwindCSS-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="Deployed on Vercel" src="https://img.shields.io/badge/Deployed%20on-Vercel-000000?logo=vercel&logoColor=white" />
 </p>
@@ -96,7 +97,7 @@ Detailed guides live in [`docs/`](docs/README.md):
 | Frontend | React 19, Vite 8, React Router 7 |
 | Styling | TailwindCSS 3, Framer Motion, Lucide React |
 | Backend | Node.js, Express 4, Nodemon |
-| Database | MySQL 8 (`mysql2` connection pool) |
+| Database | Supabase (PostgreSQL 17) via the `pg` driver |
 | Auth | JWT, bcrypt |
 | Security | Helmet, CORS, express-rate-limit, express-validator, RBAC middleware |
 | Other | Multer (uploads), Nodemailer (OTP email) |
@@ -109,7 +110,7 @@ Detailed guides live in [`docs/`](docs/README.md):
 ### Prerequisites
 
 - **Node.js `^20.19.0` or `>=22.12.0`** (required by Vite 8)
-- **MySQL** running locally (XAMPP / WAMP / MySQL Server)
+- **A Supabase project** (free tier) — the database is PostgreSQL, so there is nothing to install locally
 
 ### 1. Install dependencies
 
@@ -131,24 +132,34 @@ cp .env.example .env          # Windows: copy .env.example .env
 cd server && cp .env.example .env && cd ..
 ```
 
-At minimum, set your MySQL password and a real JWT secret in `server/.env`:
+At minimum, set your database connection string and a real JWT secret in `server/.env`:
 
 ```env
-DB_PASSWORD=your_mysql_password_here
+# Supabase -> Project Settings -> Database -> Connection string -> URI (Session pooler)
+DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
 JWT_SECRET=change_this_to_a_long_random_string
 ```
+
+> Use the **Session pooler** URI for the running app: it holds one server connection per client instead of opening a new one per request, which is what keeps a serverless deployment (Vercel) from exhausting Supabase's connection limit.
 
 ### 3. Create and seed the database
 
 ```bash
-npm run db:init
+npm run db:apply-supabase   # creates the 19 tables in Supabase
+npm run db:migrate-data    # copies an existing MySQL database across (optional)
 ```
 
-This **drops and recreates** `suprema_db`, then runs `schema.sql` and `seed.sql`. It is only needed once, on a fresh setup.
+`db:apply-supabase` applies `schema.sql` to your Supabase project. `db:migrate-data` copies
+the rows of an existing MySQL database (Aiven) into Supabase, preserving every id and
+relationship — that is how this project was moved without losing a single account.
 
-> **⚠️ This deletes every account.** It runs `DROP DATABASE`, so any user who registered through the UI is permanently removed. Running it as part of your normal startup is the single most common cause of "my account disappeared and can't log in" — and the admin panel will not list the user either, because the row genuinely no longer exists.
+> **⚠️ This deletes every account.** `db:init` and `db:reset` drop the schema, so any user
+> who registered through the UI is permanently removed. Running it as part of your normal
+> startup is the single most common cause of "my account disappeared and can't log in" — and
+> the admin panel will not list the user either, because the row genuinely no longer exists.
 >
-> `db:init` now refuses to run when the database already contains users, and tells you to use `npm run dev` instead. If you genuinely want a clean slate, ask for it explicitly:
+> `db:init` now refuses to run when the database already contains users, and tells you to
+> use `npm run dev` instead. If you genuinely want a clean slate, ask for it explicitly:
 >
 > ```bash
 > npm run db:reset        # destructive, on purpose
@@ -211,7 +222,7 @@ Run from the **root** directory:
 │   └── App.jsx                 # Router and layout
 │
 ├── server/                     # Express API
-│   ├── config/db.js            # MySQL pool + startup migration guard
+│   ├── config/db.js            # PostgreSQL pool + startup migration guard
 │   ├── controllers/            # Request handlers
 │   ├── database/
 │   │   ├── schema.sql          # Source of truth for a fresh DB
@@ -421,7 +432,7 @@ Unknown `user_ids` are skipped rather than failing the whole send, and the respo
 
 ## Database
 
-MySQL, 12 tables:
+PostgreSQL (Supabase), 19 tables:
 
 ```
 users                 workspaces          workspace_members
@@ -468,27 +479,37 @@ Express app that already exports its `app`, so Vercel detects it automatically �
 but **two platform constraints must be solved first**, or the deploy "succeeds"
 while the API silently breaks:
 
-1. **MySQL** — Vercel hosts no database. `DB_HOST=localhost` cannot work: point
-   the API at a hosted MySQL and set `DB_SSL=true`.
+1. **Database** — Vercel hosts no database. Point the API at Supabase with a
+   `DATABASE_URL` (the **Session pooler** URI — see below).
 2. **File uploads** — Vercel's filesystem is read-only. Whenever
    `CLOUDINARY_URL` is set, avatars and task attachments are stored on
    Cloudinary and DB rows hold the absolute URL; without it, files fall back to
    `server/uploads/` (local development only).
 
-### 1. Hosted MySQL (one-time)
+### 1. Supabase (one-time)
 
-1. Create a free MySQL service — no credit card required:
-   [Aiven for MySQL free tier](https://aiven.io/free-mysql-database)
-   (1 GB, external connections over TLS allowed). Alternatives: Railway, PlanetScale.
-2. Move your local data over:
+1. Create a free project at [supabase.com](https://supabase.com/dashboard) — no
+   credit card required.
+2. **Region matters.** Pick the region closest to where Vercel runs your
+   functions. Vercel's default region is `iad1` (Washington DC, Virginia), so
+   choose **US East (North Virginia)**. The API and the database then sit in the
+   same region and every query is a local round trip.
+3. Project → **Settings → Database** → **Connection string** → **URI**:
+   - **Session pooler** (port `5432`) → this is the `DATABASE_URL` for the app
+   - **Direct connection** (port `5432` on `db.<ref>.supabase.co`) → used by
+     the migration scripts
+4. Apply the schema, and copy any existing data across:
    ```bash
-   mysqldump -u root -p suprema_db > suprema-dump.sql
-   mysql --host <DB_HOST> --port <DB_PORT> --user <DB_USER> -p \
-     --ssl-mode=REQUIRED <DB_NAME> < suprema-dump.sql
+   npm run db:apply-supabase   # creates the 19 tables
+   npm run db:migrate-data    # copies an existing MySQL database across
    ```
-   (or start empty and run `npm run db:init` inside `server/`)
-3. Put the credentials in `server/.env` with `DB_SSL=true` and run `npm run dev`
-   locally to confirm everything works against the hosted database before deploying.
+5. Put the connection string in `server/.env` and run `npm run dev` locally to
+   confirm everything works against Supabase before deploying.
+
+> **Why the Session pooler and not the direct connection?** On Vercel every
+> request can spin up a fresh function, and each one would open its own
+> database connection. The pooler multiplexes them through a single gateway, so
+> a burst of traffic cannot exhaust Supabase's connection limit.
 
 ### 2. Cloudinary for uploads (one-time)
 
@@ -511,8 +532,7 @@ while the API silently breaks:
 
    | Variable | Value |
    | --- | --- |
-   | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | from the hosted provider |
-   | `DB_SSL` | `true` |
+   | `DATABASE_URL` | the Supabase **Session pooler** URI (port `5432`) |
    | `DB_CONNECTION_LIMIT` | `5` (free tiers cap total connections) |
    | `JWT_SECRET` | a long random string — never the dev fallback |
    | `NODE_ENV` | `production` |
@@ -574,8 +594,12 @@ reports the email as verified.
 - **4.5 MB max request body** on Vercel — the attachment upload cap (10 MB in
   dev) effectively becomes 4.5 MB in production.
 - The rate limiter is in-memory: counts are per function instance, not global.
-- Aiven's free service powers off after a period of inactivity — wake it from
-  the console (you get an email first).
+- Supabase's free tier pauses a project after a period of inactivity — wake it
+  from the console (you get an email first).
+- **The database and the API should share a region.** Supabase lets you pick
+  one when you create the project; match it to Vercel's function region
+  (`iad1` by default) so a query is a local round trip rather than an
+  inter-continent one.
 - Deploy previews have their own origin; append it to `CLIENT_ORIGIN` if API
   calls from a preview must work.
 - If Vercel serves the raw source instead of the API, add a `server/vercel.json`

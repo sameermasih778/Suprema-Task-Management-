@@ -52,7 +52,7 @@ const submitContactMessage = async (req, res, next) => {
     }
 
     await pool.query(
-      'INSERT INTO contact_messages (name, email, subject, message) VALUES (?, ?, ?, ?)',
+      'INSERT INTO contact_messages (name, email, subject, message) VALUES ($1, $2, $3, $4) RETURNING id',
       [name, email, subject, message]
     );
 
@@ -93,7 +93,7 @@ const joinWaitlist = async (req, res, next) => {
     }
 
     const [existing] = await pool.query(
-      'SELECT id, queue_position FROM waitlist_leads WHERE email = ?',
+      'SELECT id, queue_position FROM waitlist_leads WHERE email = $1',
       [email]
     );
     if (existing.length > 0) {
@@ -117,15 +117,16 @@ const joinWaitlist = async (req, res, next) => {
 
     try {
       await pool.query(
-        'INSERT INTO waitlist_leads (email, queue_position, referral_code) VALUES (?, ?, ?)',
+        'INSERT INTO waitlist_leads (email, queue_position, referral_code) VALUES ($1, $2, $3) RETURNING id',
         [email, position, referralCode]
       );
     } catch (insertErr) {
       // Lost a race, or the email was inserted a moment ago: report the real
       // position rather than a 500.
-      if (insertErr.code === 'ER_DUP_ENTRY') {
+      // 23505 is PostgreSQL's unique_violation.
+      if (insertErr.code === '23505') {
         const [[again]] = await pool.query(
-          'SELECT queue_position FROM waitlist_leads WHERE email = ?',
+          'SELECT queue_position FROM waitlist_leads WHERE email = $1',
           [email]
         );
         return res.status(200).json({
@@ -172,7 +173,7 @@ const getChangelogs = async (req, res, next) => {
       badge: row.badge,
       badgeColor: row.badge_color,
       // Heading fields only: rows written before the write-path fix store an
-      // escaped "\n" there (see utils/text.js). Normalising on read means the
+      // escaped '\n' there (see utils/text.js). Normalising on read means the
       // existing entries render with a real line break, without rewriting the
       // table. Free text keeps any genuine backslash it contains.
       title: withLineBreaks(row.title),
@@ -208,7 +209,7 @@ const getPricingPlans = async (req, res, next) => {
       id: row.plan_id,
       slug: row.plan_id,
       name: row.name,
-      // Kept as the display string the page already renders ("$12"), plus the
+      // Kept as the display string the page already renders ('?'), plus the
       // numeric value so the yearly toggle can actually change the price
       // instead of only animating a switch.
       price: row.price_monthly,
@@ -251,7 +252,7 @@ function parseJsonArray(value) {
   }
 }
 
-/** '$12' -> 12 */
+/** '?' -> 12 */
 function numericPrice(value) {
   if (value === null || value === undefined) return null;
   const n = Number(String(value).replace(/[^0-9.]/g, ''));

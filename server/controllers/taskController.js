@@ -27,7 +27,7 @@ const notifyTaskAssigned = async ({ assigneeId, actorId, actorName, taskTitle, t
   try {
     await pool.query(
       `INSERT INTO notifications (user_id, title, message, type, is_read, link)
-       VALUES (?, ?, ?, 'task_assigned', FALSE, ?)`,
+       VALUES ($1, $2, $3, 'task_assigned', FALSE, $4) RETURNING id`,
       [
         assigneeId,
         `Task assigned: ${taskTitle}`,
@@ -75,25 +75,25 @@ const getTasks = async (req, res, next) => {
     const queryParams = [];
 
     if (project_id) {
-      query += ' WHERE t.project_id = ?';
+      query += ' WHERE t.project_id = $1';
       queryParams.push(project_id);
     } else {
-      query += ' WHERE p.workspace_id = ?';
+      query += ' WHERE p.workspace_id = $1';
       queryParams.push(workspace_id);
     }
 
     if (status) {
-      query += ' AND t.status = ?';
+      query += ' AND t.status = $' + (queryParams.length + 1);
       queryParams.push(status);
     }
 
     if (priority) {
-      query += ' AND t.priority = ?';
+      query += ' AND t.priority = $' + (queryParams.length + 1);
       queryParams.push(priority);
     }
 
     if (assignee_id) {
-      query += ' AND t.assignee_id = ?';
+      query += ' AND t.assignee_id = $' + (queryParams.length + 1);
       queryParams.push(assignee_id);
     }
 
@@ -101,7 +101,7 @@ const getTasks = async (req, res, next) => {
       if (parent_id === 'null' || parent_id === '') {
         query += ' AND t.parent_id IS NULL';
       } else {
-        query += ' AND t.parent_id = ?';
+        query += ' AND t.parent_id = $' + (queryParams.length + 1);
         queryParams.push(parent_id);
       }
     }
@@ -143,7 +143,7 @@ const getTaskById = async (req, res, next) => {
        JOIN projects p ON t.project_id = p.id
        LEFT JOIN users u_assignee ON t.assignee_id = u_assignee.id
        LEFT JOIN users u_creator ON t.created_by = u_creator.id
-       WHERE t.id = ?`,
+       WHERE t.id = $1`,
       [taskId]
     );
 
@@ -186,7 +186,7 @@ const getTaskActivity = async (req, res, next) => {
       `SELECT t.id, t.title, p.workspace_id
        FROM tasks t
        JOIN projects p ON t.project_id = p.id
-       WHERE t.id = ?`,
+       WHERE t.id = $1`,
       [taskId]
     );
 
@@ -203,7 +203,7 @@ const getTaskActivity = async (req, res, next) => {
     // to. Without this check any authenticated user could read another
     // workspace's audit trail by guessing a task id.
     const [membership] = await pool.query(
-      'SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?',
+      'SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
       [workspaceId, req.user.id]
     );
 
@@ -216,11 +216,11 @@ const getTaskActivity = async (req, res, next) => {
 
     const [activities] = await pool.query(
       `SELECT al.id, al.action, al.entity_type, al.entity_id, al.details, al.created_at,
-              TIMESTAMPDIFF(SECOND, al.created_at, NOW()) AS seconds_ago,
+              EXTRACT(EPOCH FROM (NOW() - al.created_at))::int AS seconds_ago,
               u.name AS user_name, u.avatar_url AS user_avatar, u.role AS user_role
        FROM activity_logs al
        LEFT JOIN users u ON al.user_id = u.id
-       WHERE al.workspace_id = ? AND al.entity_type = 'task' AND al.entity_id = ?
+       WHERE al.workspace_id = $1 AND al.entity_type = 'task' AND al.entity_id = $2
        ORDER BY al.created_at DESC
        LIMIT 50`,
       [workspaceId, taskId]
@@ -250,7 +250,7 @@ const getSubtasks = async (req, res, next) => {
               u_assignee.name AS assignee_name, u_assignee.avatar_url AS assignee_avatar
        FROM tasks t
        LEFT JOIN users u_assignee ON t.assignee_id = u_assignee.id
-       WHERE t.parent_id = ?
+       WHERE t.parent_id = $1
        ORDER BY t.created_at ASC`,
       [taskId]
     );
@@ -293,13 +293,13 @@ const createTask = async (req, res, next) => {
     }
 
     // Get project workspace_id for audit logs
-    const [projectRows] = await pool.query('SELECT workspace_id, name FROM projects WHERE id = ?', [project_id]);
+    const [projectRows] = await pool.query('SELECT workspace_id, name FROM projects WHERE id = $1', [project_id]);
     const workspaceId = projectRows.length > 0 ? projectRows[0].workspace_id : null;
 
     const [result] = await pool.query(
       `INSERT INTO tasks 
        (project_id, title, description, status, priority, due_date, estimated_hours, created_by, assignee_id, parent_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
       [
         project_id,
         title.trim(),
@@ -388,7 +388,7 @@ const updateTask = async (req, res, next) => {
       `SELECT t.*, p.workspace_id, p.name AS project_name
        FROM tasks t 
        JOIN projects p ON t.project_id = p.id 
-       WHERE t.id = ?`,
+       WHERE t.id = $1`,
       [taskId]
     );
 
@@ -411,8 +411,8 @@ const updateTask = async (req, res, next) => {
     const updatedAssigneeId = assignee_id !== undefined ? assignee_id : current.assignee_id;
 
     // Work out exactly which fields changed, so the change history can say
-    // WHAT changed ("priority: medium -> high") instead of a vague
-    // "details were updated".
+    // WHAT changed ('priority: medium -> high') instead of a vague
+    // 'details were updated'.
     const changes = {};
     const track = (field, from, to) => {
       const norm = (v) => (v === undefined || v === '' ? null : v);
@@ -421,13 +421,14 @@ const updateTask = async (req, res, next) => {
       }
     };
 
-    // Resolve assignee ids to names so the history reads "assigned to Sameer"
-    // rather than "assignee 3 -> 5".
+    // Resolve assignee ids to names so the history reads 'assigned to Sameer'
+    // rather than 'assignee 3 -> 5'.
     const assigneeNames = {};
     const assigneeIds = [current.assignee_id, updatedAssigneeId].filter((v) => v !== undefined && v !== null);
     if (assigneeIds.length) {
+      const placeholders = assigneeIds.map((_, i) => '$' + (i + 1)).join(', ');
       const [nameRows] = await pool.query(
-        `SELECT id, name FROM users WHERE id IN (${assigneeIds.map(() => '?').join(', ')})`,
+        `SELECT id, name FROM users WHERE id IN (${placeholders})`,
         assigneeIds
       );
       nameRows.forEach((u) => { assigneeNames[u.id] = u.name; });
@@ -444,8 +445,8 @@ const updateTask = async (req, res, next) => {
 
     await pool.query(
       `UPDATE tasks 
-       SET title = ?, description = ?, status = ?, priority = ?, due_date = ?, estimated_hours = ?, actual_hours = ?, assignee_id = ?
-       WHERE id = ?`,
+       SET title = $1, description = $2, status = $3, priority = $4, due_date = $5, estimated_hours = $6, actual_hours = $7, assignee_id = $8
+       WHERE id = $9`,
       [
         updatedTitle,
         updatedDescription,
@@ -532,7 +533,7 @@ const updateTaskStatus = async (req, res, next) => {
       `SELECT t.*, p.workspace_id 
        FROM tasks t 
        JOIN projects p ON t.project_id = p.id 
-       WHERE t.id = ?`,
+       WHERE t.id = $1`,
       [taskId]
     );
 
@@ -545,7 +546,7 @@ const updateTaskStatus = async (req, res, next) => {
 
     const current = existing[0];
 
-    await pool.query('UPDATE tasks SET status = ? WHERE id = ?', [status, taskId]);
+    await pool.query('UPDATE tasks SET status = $1 WHERE id = $2', [status, taskId]);
 
     // Audit log
     await logActivity({
@@ -583,7 +584,7 @@ const deleteTask = async (req, res, next) => {
       `SELECT t.*, p.workspace_id 
        FROM tasks t 
        JOIN projects p ON t.project_id = p.id 
-       WHERE t.id = ?`,
+       WHERE t.id = $1`,
       [taskId]
     );
 
@@ -596,7 +597,7 @@ const deleteTask = async (req, res, next) => {
 
     const current = existing[0];
 
-    await pool.query('DELETE FROM tasks WHERE id = ?', [taskId]);
+    await pool.query('DELETE FROM tasks WHERE id = $1', [taskId]);
 
     // Audit log
     await logActivity({

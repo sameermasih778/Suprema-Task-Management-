@@ -55,7 +55,7 @@ async function migrateAvatars() {
     const buffer = fs.readFileSync(filePath);
     const ext = path.extname(filePath).toLowerCase();
     const stored = await saveAvatar(buffer, ext, row.id);
-    await pool.query('UPDATE users SET avatar_url = ? WHERE id = ?', [stored.url, row.id]);
+    await pool.query('UPDATE users SET avatar_url = $1 WHERE id = $2', [stored.url, row.id]);
     fs.unlinkSync(filePath);
     console.log(`  -> user ${row.id}: ${row.avatar_url} => ${stored.url}`);
     moved++;
@@ -82,7 +82,7 @@ async function migrateAttachments() {
     const ext = path.extname(filePath).toLowerCase();
     const stored = await saveAttachment(buffer, { ext, mime: row.mime_type });
     await pool.query(
-      'UPDATE task_attachments SET file_path = ?, filename = ? WHERE id = ?',
+      'UPDATE task_attachments SET file_path = $1, filename = $2 WHERE id = $3',
       [stored.url, stored.publicId, row.id]
     );
     fs.unlinkSync(filePath);

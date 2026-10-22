@@ -1,68 +1,76 @@
-const mysql = require('mysql2/promise');
+/**
+ * Recreate the database schema from scratch (PostgreSQL / Supabase).
+ *
+ * Guard against destroying existing data.
+ *
+ * PostgreSQL has no `CREATE DATABASE` isolation, so the unit that gets
+ * dropped is a SCHEMA. `public` holds the live application data; this script
+ * drops and recreates it, which is the equivalent of the old
+ * "drop the database and start again".
+ *
+ * If the schema already contains real rows we stop and require --force.
+ */
+const { Client } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '3306', 10),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  multipleStatements: true
-};
-
-const dbName = process.env.DB_NAME || 'suprema_db';
+const CONNECTION_STRING = process.env.DATABASE_URL;
+const TARGET_SCHEMA = 'public';
 
 /**
  * Guard against destroying an existing database.
  *
- * This script DROPs the whole database, so running it out of habit (for example
- * as part of a normal `npm run dev` startup) silently deletes every registered
- * account. Newly created users then cannot log in and do not appear in the
- * admin panel, which looks exactly like a login bug but is data loss.
+ * This script DROPs the whole schema, so running it out of habit (for example
+ * as part of a normal `npm run dev` startup) silently deletes every
+ * registered account. Newly created users then cannot log in and do not
+ * appear in the admin panel, which looks exactly like a login bug but is data
+ * loss.
  *
- * If the database already contains real rows we stop and require --force.
+ * If the schema already contains real rows we stop and require --force.
  */
 const force = process.argv.includes('--force') || process.env.SUPREMA_DB_FORCE === '1';
 
 async function inspectExisting(connection) {
-  const [dbRows] = await connection.query(
-    'SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?',
-    [dbName]
+  const [rows] = await connection.query(
+    `SELECT COUNT(*)::int AS total FROM information_schema.tables
+      WHERE table_schema = $1 AND table_name = 'users'`,
+    [TARGET_SCHEMA]
   );
-  if (dbRows.length === 0) return { exists: false, userCount: 0 };
-
-  const [tableRows] = await connection.query(
-    `SELECT TABLE_NAME FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'`,
-    [dbName]
-  );
-  if (tableRows.length === 0) return { exists: true, userCount: 0 };
+  if (rows[0].total === 0) return { exists: false, userCount: 0 };
 
   const [countRows] = await connection.query(
-    `SELECT COUNT(*) AS total FROM \`${dbName}\`.users`
+    `SELECT COUNT(*)::int AS total FROM ${TARGET_SCHEMA}.users`
   );
   return { exists: true, userCount: countRows[0].total };
 }
 
 async function initializeDatabase() {
-  console.log('\n🚀 Starting Suprema MySQL Database Initialization...\n');
+  console.log('\n🚀 Starting Suprema Database Initialization (PostgreSQL)\n');
   let connection;
 
   try {
-    // 1. Connect without selecting a DB first
-    connection = await mysql.createConnection(dbConfig);
-    console.log(`🔌 Connected to MySQL server at ${dbConfig.host}:${dbConfig.port}`);
+    if (!CONNECTION_STRING) {
+      throw new Error('DATABASE_URL is not set in server/.env');
+    }
 
-    // 1b. Refuse to silently destroy an existing, populated database
+    connection = new Client({
+      connectionString: CONNECTION_STRING,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 15000
+    });
+    await connection.connect();
+    console.log('🔌 Connected to PostgreSQL');
+
+    // 1b. Refuse to silently destroy an existing, populated schema
     const existing = await inspectExisting(connection);
     if (existing.exists && existing.userCount > 0 && !force) {
       console.error('\n╔══════════════════════════════════════════════════════════════╗');
       console.error('║  STOPPED: this would DESTROY your existing data.              ║');
       console.error('╚══════════════════════════════════════════════════════════════╝');
-      console.error(`\n   Database '${dbName}' already exists and contains ${existing.userCount} user(s).`);
+      console.error(`\n   Schema '${TARGET_SCHEMA}' already contains ${existing.userCount} user(s).`);
       console.error('   Dropping it would permanently delete every registered account.\n');
       console.error('   To just start the app you do NOT need this - use:');
       console.error('       npm run dev\n');
@@ -73,15 +81,17 @@ async function initializeDatabase() {
     }
 
     if (existing.exists && force) {
-      console.warn(`\n⚠️  --force supplied: destroying '${dbName}' (${existing.userCount} user(s) will be lost).`);
+      console.warn(
+        `\n⚠️  --force supplied: destroying '${TARGET_SCHEMA}' (${existing.userCount} user(s) will be lost).`
+      );
     }
 
-    // 2. Drop and Create Database
-    console.log(`📦 Recreating database '${dbName}'...`);
-    await connection.query(`DROP DATABASE IF EXISTS \`${dbName}\`;`);
-    await connection.query(`CREATE DATABASE \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
-    await connection.query(`USE \`${dbName}\`;`);
-    console.log(`✅ Database '${dbName}' is ready.`);
+    // 2. Drop and recreate the schema
+    console.log(`📦 Recreating schema '${TARGET_SCHEMA}'...`);
+    await connection.query(`DROP SCHEMA IF EXISTS ${TARGET_SCHEMA} CASCADE`);
+    await connection.query(`CREATE SCHEMA ${TARGET_SCHEMA}`);
+    await connection.query(`SET search_path TO ${TARGET_SCHEMA}`);
+    console.log(`✅ Schema '${TARGET_SCHEMA}' is ready.`);
 
     // 3. Read and execute schema.sql
     const schemaPath = path.join(__dirname, '../database/schema.sql');
@@ -89,7 +99,7 @@ async function initializeDatabase() {
       console.log('⚙️ Executing Database Schema (schema.sql)...');
       const schemaSql = fs.readFileSync(schemaPath, 'utf8');
       await connection.query(schemaSql);
-      console.log('✅ All 12 tables & indexes created successfully.');
+      console.log('✅ All tables & indexes created successfully.');
     } else {
       console.warn('⚠️ schema.sql file not found at:', schemaPath);
     }
@@ -105,15 +115,14 @@ async function initializeDatabase() {
       console.warn('⚠️ seed.sql file not found at:', seedPath);
     }
 
-    console.log('\n🎉 MySQL Database Initialization Completed Successfully!\n');
-
+    console.log('\n🎉 Database Initialization Completed Successfully!\n');
   } catch (error) {
     console.error('\n❌ Database Initialization Failed!');
     console.error('Error Message:', error.message || error);
     console.error('Error Code:', error.code || 'N/A');
     console.error('\n💡 Troubleshooting Tips:');
-    console.error(' 1. Ensure MySQL service (XAMPP / WAMP / MySQL Server) is RUNNING.');
-    console.error(` 2. Verify credentials in server/.env (User: "${dbConfig.user}", Host: "${dbConfig.host}:${dbConfig.port}")`);
+    console.error(' 1. Check DATABASE_URL in server/.env (it should start with postgresql://).');
+    console.error(' 2. Make sure the Supabase project is not paused.');
     process.exit(1);
   } finally {
     if (connection) {

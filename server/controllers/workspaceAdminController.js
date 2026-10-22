@@ -21,21 +21,21 @@ const PLANS = ['free', 'pro', 'enterprise'];
 const getDeletionImpact = async (workspaceId) => {
   const [counts] = await pool.query(
     `SELECT
-       (SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ?) AS members,
-       (SELECT COUNT(*) FROM teams WHERE workspace_id = ?) AS teams,
-       (SELECT COUNT(*) FROM projects WHERE workspace_id = ?) AS projects,
+       (SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1) AS members,
+       (SELECT COUNT(*) FROM teams WHERE workspace_id = $2) AS teams,
+       (SELECT COUNT(*) FROM projects WHERE workspace_id = $3) AS projects,
        (SELECT COUNT(*) FROM tasks t
           JOIN projects p ON t.project_id = p.id
-         WHERE p.workspace_id = ?) AS tasks,
+         WHERE p.workspace_id = $4) AS tasks,
        (SELECT COUNT(*) FROM task_comments tc
           JOIN tasks t ON tc.task_id = t.id
           JOIN projects p ON t.project_id = p.id
-         WHERE p.workspace_id = ?) AS comments,
+         WHERE p.workspace_id = $5) AS comments,
        (SELECT COUNT(*) FROM task_attachments ta
           JOIN tasks t ON ta.task_id = t.id
           JOIN projects p ON t.project_id = p.id
-         WHERE p.workspace_id = ?) AS attachments,
-       (SELECT COUNT(*) FROM activity_logs WHERE workspace_id = ?) AS activity_entries`,
+         WHERE p.workspace_id = $6) AS attachments,
+       (SELECT COUNT(*) FROM activity_logs WHERE workspace_id = $7) AS activity_entries`,
     [
       workspaceId, workspaceId, workspaceId, workspaceId, workspaceId, workspaceId,
       workspaceId
@@ -120,7 +120,7 @@ const createWorkspace = async (req, res, next) => {
 
     if (ownerEmail && ownerEmail.trim()) {
       const [users] = await pool.query(
-        'SELECT id, name, email FROM users WHERE email = ?',
+        'SELECT id, name, email FROM users WHERE email = $1',
         [ownerEmail.trim().toLowerCase()]
       );
       if (users.length === 0) {
@@ -139,7 +139,7 @@ const createWorkspace = async (req, res, next) => {
     await connection.beginTransaction();
 
     const [wsResult] = await connection.query(
-      'INSERT INTO workspaces (name, slug, owner_id, plan, status) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO workspaces (name, slug, owner_id, plan, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [name.trim(), slug, owner.id, plan, 'active']
     );
     const workspaceId = wsResult.insertId;
@@ -150,7 +150,7 @@ const createWorkspace = async (req, res, next) => {
       // The designated owner is NOT a member yet - they accept first.
       const [invResult] = await connection.query(
         `INSERT INTO workspace_invitations (workspace_id, user_id, email, role, invited_by, status)
-         VALUES (?, ?, ?, 'owner', ?, 'pending')`,
+         VALUES ($1, $2, $3, 'owner', $4, 'pending') RETURNING id`,
         [workspaceId, invitationFor.id, invitationFor.email, req.user.id]
       );
       invitationId = invResult.insertId;
@@ -158,7 +158,7 @@ const createWorkspace = async (req, res, next) => {
       try {
         await connection.query(
           `INSERT INTO notifications (user_id, title, message, type, is_read, link)
-           VALUES (?, ?, ?, 'invitation', FALSE, ?)`,
+           VALUES ($1, $2, $3, 'invitation', FALSE, $4) RETURNING id`,
           [
             invitationFor.id,
             `Invitation to own "${name.trim()}"`,
@@ -172,7 +172,7 @@ const createWorkspace = async (req, res, next) => {
     } else {
       // No owner named: the creating admin owns it.
       await connection.query(
-        'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)',
+        'INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id',
         [workspaceId, req.user.id, 'owner']
       );
     }
@@ -225,7 +225,7 @@ const archiveWorkspace = async (req, res, next) => {
   try {
     const workspaceId = req.params.id;
 
-    const [rows] = await pool.query('SELECT id, name, status FROM workspaces WHERE id = ?', [
+    const [rows] = await pool.query('SELECT id, name, status FROM workspaces WHERE id = $1', [
       workspaceId
     ]);
     if (rows.length === 0) {
@@ -238,7 +238,7 @@ const archiveWorkspace = async (req, res, next) => {
       });
     }
 
-    await pool.query("UPDATE workspaces SET status = 'archived' WHERE id = ?", [workspaceId]);
+    await pool.query("UPDATE workspaces SET status = 'archived' WHERE id = $1", [workspaceId]);
 
     await logActivity({
       workspace_id: workspaceId,
@@ -263,7 +263,7 @@ const restoreWorkspace = async (req, res, next) => {
   try {
     const workspaceId = req.params.id;
 
-    const [rows] = await pool.query('SELECT id, name, status FROM workspaces WHERE id = ?', [
+    const [rows] = await pool.query('SELECT id, name, status FROM workspaces WHERE id = $1', [
       workspaceId
     ]);
     if (rows.length === 0) {
@@ -276,7 +276,7 @@ const restoreWorkspace = async (req, res, next) => {
       });
     }
 
-    await pool.query("UPDATE workspaces SET status = 'active' WHERE id = ?", [workspaceId]);
+    await pool.query("UPDATE workspaces SET status = 'active' WHERE id = $1", [workspaceId]);
 
     await logActivity({
       workspace_id: workspaceId,
@@ -289,7 +289,7 @@ const restoreWorkspace = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: `"${rows[0].name}" is active again.`
+      message: `'${rows[0].name}' is active again.`
     });
   } catch (error) {
     next(error);
@@ -310,7 +310,7 @@ const getWorkspaceDeletionImpact = async (req, res, next) => {
               owner.name AS owner_name, owner.email AS owner_email
        FROM workspaces w
        LEFT JOIN users owner ON w.owner_id = owner.id
-       WHERE w.id = ?`,
+       WHERE w.id = $1`,
       [workspaceId]
     );
     if (rows.length === 0) {
@@ -344,7 +344,7 @@ const deleteWorkspace = async (req, res, next) => {
     const workspaceId = req.params.id;
     const { confirm } = req.body || {};
 
-    const [rows] = await pool.query('SELECT id, name FROM workspaces WHERE id = ?', [
+    const [rows] = await pool.query('SELECT id, name FROM workspaces WHERE id = $1', [
       workspaceId
     ]);
     if (rows.length === 0) {
@@ -353,16 +353,16 @@ const deleteWorkspace = async (req, res, next) => {
     const workspace = rows[0];
 
     if (confirm !== workspace.name) {
-      // Say WHICH of the two went wrong. "Nothing was sent" and "the name does
-      // not match" look identical from the outside, and the first one is
+      // Say WHICH of the two went wrong. 'Nothing was sent' and 'the name does
+      // not match' look identical from the outside, and the first one is
       // almost always a client sending the confirmation in the wrong place.
       const nothingSent =
         confirm === undefined || confirm === null || confirm === '';
       return res.status(400).json({
         success: false,
         message: nothingSent
-          ? `Validation Error: no confirmation was sent. Send the exact workspace name "${workspace.name}" as "confirm" in the request body.`
-          : `Validation Error: send the exact workspace name "${workspace.name}" as "confirm" to delete it`
+          ? `Validation Error: no confirmation was sent. Send the exact workspace name '${workspace.name}' as 'confirm' in the request body.`
+          : `Validation Error: send the exact workspace name '${workspace.name}' as 'confirm' to delete it`
       });
     }
 
@@ -371,7 +371,7 @@ const deleteWorkspace = async (req, res, next) => {
     // The one thing that must never happen is deleting your LAST remaining
     // workspace, because that locks you out of the app entirely.
     const [otherWorkspaces] = await pool.query(
-      'SELECT workspace_id FROM workspace_members WHERE user_id = ? AND workspace_id <> ?',
+      'SELECT workspace_id FROM workspace_members WHERE user_id = $1 AND workspace_id <> $2',
       [req.user.id, workspaceId]
     );
     if (otherWorkspaces.length === 0) {
@@ -387,7 +387,7 @@ const deleteWorkspace = async (req, res, next) => {
     // Cascades take the members, teams, projects, tasks, comments, attachments
     // and the audit trail with it. The notifications are user-scoped and
     // survive, so the people involved still see what happened.
-    await pool.query('DELETE FROM workspaces WHERE id = ?', [workspaceId]);
+    await pool.query('DELETE FROM workspaces WHERE id = $1', [workspaceId]);
 
     res.status(200).json({
       success: true,

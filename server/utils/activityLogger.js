@@ -15,7 +15,7 @@ const logActivity = async ({ workspace_id, user_id, action, entity_type, entity_
     if (!workspace_id) return;
     await pool.query(
       `INSERT INTO activity_logs (workspace_id, user_id, action, entity_type, entity_id, details)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
       [
         workspace_id,
         user_id || null,

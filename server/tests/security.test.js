@@ -83,14 +83,15 @@ describe('error handling leaks nothing', () => {
 
   test('a duplicate key is reported as 409 without the SQL error', () => {
     const res = makeRes();
-    const err = new Error("Duplicate entry 'admin@x.io' for key 'users.email'");
-    err.code = 'ER_DUP_ENTRY';
+    const err = new Error("Duplicate key value violates unique constraint \"users_email_key\"");
+    // 23505 is PostgreSQL's unique_violation.
+    err.code = '23505';
 
     errorHandler(err, {}, res, () => {});
 
     expect(res.statusCode).toBe(409);
     expect(res.payload.message).toMatch(/already exists/i);
-    expect(JSON.stringify(res.payload)).not.toContain('ER_DUP_ENTRY');
+    expect(JSON.stringify(res.payload)).not.toContain('23505');
   });
 
   test('the stack is only ever included in development', () => {

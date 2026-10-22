@@ -9,7 +9,11 @@ const { app, request, pool, fixtures } = require('./helpers');
 
 describe('test harness', () => {
   test('runs against the test database, never production', async () => {
-    expect(process.env.DB_NAME).toBe('suprema_test');
+    // PostgreSQL has no separate databases, so isolation is by SCHEMA. The
+    // schema must be one of ours, and it must not be the public schema the
+    // live application data lives in.
+    expect(process.env.DB_SEARCH_PATH).toMatch(/^suprema_test_/);
+    expect(process.env.DB_SEARCH_PATH).not.toBe('public');
     expect(process.env.NODE_ENV).toBe('test');
   });
 
@@ -20,7 +24,7 @@ describe('test harness', () => {
 
   test('connects to a database with the full schema', async () => {
     const [[row]] = await pool.query(
-      "SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE()"
+      "SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = current_schema()"
     );
     expect(row.c).toBeGreaterThanOrEqual(17);
   });

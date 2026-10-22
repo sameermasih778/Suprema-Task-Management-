@@ -88,14 +88,14 @@ const createUser = async ({ name, email, role = 'member', passwordHash }) => {
   const bcrypt = require('bcryptjs');
   const hash = passwordHash || (await bcrypt.hash('TestPass123!', 4));
   const [result] = await pool.query(
-    'INSERT INTO users (name, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO users (name, email, password_hash, role, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
     [name, email, hash, role, 'active']
   );
   return { id: result.insertId, name, email, role };
 };
 
 const deleteUserByEmail = async (email) => {
-  await pool.query('DELETE FROM users WHERE email = ?', [email]);
+  await pool.query('DELETE FROM users WHERE email = $1', [email]);
 };
 
 module.exports = {

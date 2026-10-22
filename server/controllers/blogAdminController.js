@@ -38,7 +38,7 @@ const getAdminBlogs = async (req, res, next) => {
 ──────────────────────────────────────────────────────────────────── */
 const getAdminBlogById = async (req, res, next) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM blogs WHERE id = ?', [req.params.id]);
+    const [rows] = await pool.query('SELECT * FROM blogs WHERE id = $1', [req.params.id]);
     if (!rows.length) return res.status(404).json({ success: false, message: 'Blog post not found.' });
     res.json({ success: true, blog: rows[0] });
   } catch (err) {
@@ -106,7 +106,7 @@ const createBlog = async (req, res, next) => {
     }
 
     // Slug uniqueness check
-    const [existing] = await pool.query('SELECT id FROM blogs WHERE slug = ?', [clean(slug)]);
+    const [existing] = await pool.query('SELECT id FROM blogs WHERE slug = $1', [clean(slug)]);
     if (existing.length) {
       return res.status(409).json({ success: false, message: 'A post with this slug already exists.', errors: { slug: 'Slug must be unique' } });
     }
@@ -123,7 +123,7 @@ const createBlog = async (req, res, next) => {
          (title, slug, excerpt, content, sections, category, category_color, category_bg,
           banner_title, date, author_name, author_role, author_avatar, featured,
           status, read_time, cover_image, tags, published_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
       [
         clean(title), clean(slug), clean(excerpt), clean(content), sectionsJson,
         clean(category), catStyle.color, catStyle.bg,
@@ -147,7 +147,7 @@ const createBlog = async (req, res, next) => {
 const updateBlog = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const [existing] = await pool.query('SELECT id, status, published_at FROM blogs WHERE id = ?', [id]);
+    const [existing] = await pool.query('SELECT id, status, published_at FROM blogs WHERE id = $1', [id]);
     if (!existing.length) return res.status(404).json({ success: false, message: 'Blog post not found.' });
 
     const {
@@ -162,7 +162,7 @@ const updateBlog = async (req, res, next) => {
       if (!clean(slug)) errors.slug = 'Slug cannot be empty';
       else if (!/^[a-z0-9-]+$/.test(clean(slug))) errors.slug = 'Slug may only contain lowercase letters, numbers, and hyphens';
       else {
-        const [dup] = await pool.query('SELECT id FROM blogs WHERE slug = ? AND id != ?', [clean(slug), id]);
+        const [dup] = await pool.query('SELECT id FROM blogs WHERE slug = $1 AND id != $2', [clean(slug), id]);
         if (dup.length) errors.slug = 'Another post already uses this slug';
       }
     }
@@ -184,7 +184,13 @@ const updateBlog = async (req, res, next) => {
     // Build dynamic update
     const fields = [];
     const values = [];
-    const set = (col, val) => { fields.push(`${col} = ?`); values.push(val); };
+    // PostgreSQL placeholders are numbered ($1, $2, ...) and have to line up
+    // with the order of the values array, so the counter advances with every
+    // field that is set.
+    const set = (col, val) => {
+      values.push(val);
+      fields.push(`${col} = $` + values.length);
+    };
 
     if (title !== undefined) {
       set('title', clean(title));
@@ -214,7 +220,7 @@ const updateBlog = async (req, res, next) => {
     if (!fields.length) return res.status(400).json({ success: false, message: 'No fields to update.' });
 
     values.push(id);
-    await pool.query(`UPDATE blogs SET ${fields.join(', ')} WHERE id = ?`, values);
+    await pool.query(`UPDATE blogs SET ${fields.join(', ')} WHERE id = $` + values.length, values);
 
     res.json({ success: true, message: 'Blog post updated.' });
   } catch (err) {
@@ -228,7 +234,7 @@ const updateBlog = async (req, res, next) => {
 ──────────────────────────────────────────────────────────────────── */
 const deleteBlog = async (req, res, next) => {
   try {
-    const [result] = await pool.query('DELETE FROM blogs WHERE id = ?', [req.params.id]);
+    const [result] = await pool.query('DELETE FROM blogs WHERE id = $1', [req.params.id]);
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Blog post not found.' });
     res.json({ success: true, message: 'Blog post deleted.' });
   } catch (err) {
@@ -246,39 +252,39 @@ const getPlatformOverview = async (req, res, next) => {
     const [[userStats]] = await pool.query(
       `SELECT
          COUNT(*) AS total_users,
-         SUM(role = 'super_admin') AS super_admins,
-         SUM(role = 'admin') AS admins,
-         SUM(role = 'developer') AS developers,
-         SUM(role = 'member') AS members,
-         SUM(status = 'active') AS active_users,
-         SUM(status = 'suspended') AS suspended_users
+         COUNT(*) FILTER (WHERE role = 'super_admin') AS super_admins,
+         COUNT(*) FILTER (WHERE role = 'admin') AS admins,
+         COUNT(*) FILTER (WHERE role = 'developer') AS developers,
+         COUNT(*) FILTER (WHERE role = 'member') AS members,
+         COUNT(*) FILTER (WHERE status = 'active') AS active_users,
+         COUNT(*) FILTER (WHERE status = 'suspended') AS suspended_users
        FROM users`
     );
 
     const [[workspaceStats]] = await pool.query(
       `SELECT
          COUNT(*) AS total_workspaces,
-         SUM(plan = 'free') AS free_plan,
-         SUM(plan = 'pro') AS pro_plan,
-         SUM(plan = 'enterprise') AS enterprise_plan
+         COUNT(*) FILTER (WHERE plan = 'free') AS free_plan,
+         COUNT(*) FILTER (WHERE plan = 'pro') AS pro_plan,
+         COUNT(*) FILTER (WHERE plan = 'enterprise') AS enterprise_plan
        FROM workspaces`
     );
 
     const [[projectStats]] = await pool.query(
       `SELECT
          COUNT(*) AS total_projects,
-         SUM(status = 'active') AS active_projects,
-         SUM(status = 'completed') AS completed_projects,
-         SUM(status = 'on_hold') AS on_hold_projects
+         COUNT(*) FILTER (WHERE status = 'active') AS active_projects,
+         COUNT(*) FILTER (WHERE status = 'completed') AS completed_projects,
+         COUNT(*) FILTER (WHERE status = 'on_hold') AS on_hold_projects
        FROM projects`
     );
 
     const [[taskStats]] = await pool.query(
       `SELECT
          COUNT(*) AS total_tasks,
-         SUM(status = 'todo') AS todo,
-         SUM(status = 'in_progress') AS in_progress,
-         SUM(status = 'done') AS done
+         COUNT(*) FILTER (WHERE status = 'todo') AS todo,
+         COUNT(*) FILTER (WHERE status = 'in_progress') AS in_progress,
+         COUNT(*) FILTER (WHERE status = 'done') AS done
        FROM tasks`
     );
 
@@ -293,7 +299,7 @@ const getPlatformOverview = async (req, res, next) => {
        LEFT JOIN users u ON u.id = w.owner_id
        LEFT JOIN workspace_members wm ON wm.workspace_id = w.id
        LEFT JOIN projects p ON p.workspace_id = w.id
-       GROUP BY w.id
+       GROUP BY w.id, w.name, w.slug, w.plan, w.created_at, u.name, u.email
        ORDER BY w.created_at DESC
        LIMIT 50`
     );
@@ -363,7 +369,7 @@ const getPublicBlogs = async (req, res, next) => {
 const getPublicBlogBySlug = async (req, res, next) => {
   try {
     const [rows] = await pool.query(
-      'SELECT * FROM blogs WHERE slug = ? AND status = ?',
+      'SELECT * FROM blogs WHERE slug = $1 AND status = $2',
       [req.params.slug, 'published']
     );
 

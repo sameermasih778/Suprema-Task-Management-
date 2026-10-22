@@ -149,7 +149,7 @@ describe('verified profiles', () => {
     expect(res.status).toBe(401);
     expect(res.body.message).toMatch(/not verified/i);
 
-    const [[row]] = await pool.query('SELECT COUNT(*) AS c FROM users WHERE email = ?', [email]);
+    const [[row]] = await pool.query('SELECT COUNT(*) AS c FROM users WHERE email = $1', [email]);
     expect(row.c).toBe(0);
   });
 
@@ -181,7 +181,7 @@ describe('role guarantees', () => {
     expect(res.status).toBe(200);
     expect(res.body.user.role).toBe('member');
 
-    const [[row]] = await pool.query('SELECT role, status FROM users WHERE email = ?', [email]);
+    const [[row]] = await pool.query('SELECT role, status FROM users WHERE email = $1', [email]);
     expect(row.role).toBe('member');
     expect(row.status).toBe('active');
   });
@@ -196,7 +196,7 @@ describe('role guarantees', () => {
     expect(res.status).toBe(200);
     expect(res.body.user.role).toBe('developer');
 
-    const [[row]] = await pool.query('SELECT role FROM users WHERE email = ?', [email]);
+    const [[row]] = await pool.query('SELECT role FROM users WHERE email = $1', [email]);
     expect(row.role).toBe('developer');
 
     await deleteUserByEmail(email);
@@ -216,7 +216,7 @@ describe('role guarantees', () => {
   test('a suspended account is refused even with a valid credential', async () => {
     const email = `${marker()}@suprema.test`;
     await createUser({ name: 'Suspended', email, role: 'member' });
-    await pool.query("UPDATE users SET status = 'suspended' WHERE email = ?", [email]);
+    await pool.query("UPDATE users SET status = 'suspended' WHERE email = $1", [email]);
 
     withProfile({ email, email_verified: true, name: 'Suspended' });
     const res = await signIn({ credential: ID_TOKEN });
@@ -237,7 +237,7 @@ describe('account creation details', () => {
 
     // The stored hash is a deliberately unusable marker, not a bcrypt digest,
     // so nothing can ever compare equal to it.
-    const [[row]] = await pool.query('SELECT password_hash FROM users WHERE email = ?', [email]);
+    const [[row]] = await pool.query('SELECT password_hash FROM users WHERE email = $1', [email]);
     expect(row.password_hash.startsWith('!google-')).toBe(true);
 
     const login = await request(app).post('/api/v1/auth/login').send({
@@ -256,7 +256,7 @@ describe('account creation details', () => {
     await signIn({ credential: ID_TOKEN });
     await signIn({ credential: ID_TOKEN });
 
-    const [[row]] = await pool.query('SELECT COUNT(*) AS c FROM users WHERE email = ?', [email]);
+    const [[row]] = await pool.query('SELECT COUNT(*) AS c FROM users WHERE email = $1', [email]);
     expect(row.c).toBe(1);
 
     await deleteUserByEmail(email);
@@ -280,16 +280,16 @@ describe('account creation details', () => {
 
     await signIn({ credential: ID_TOKEN });
 
-    let [[row]] = await pool.query('SELECT avatar_url FROM users WHERE email = ?', [email]);
+    let [[row]] = await pool.query('SELECT avatar_url FROM users WHERE email = $1', [email]);
     expect(row.avatar_url).toBe('https://img.test/a.png');
 
     // A picture the user set themselves must win over the Google one.
-    await pool.query('UPDATE users SET avatar_url = ? WHERE email = ?', ['https://img.test/mine.png', email]);
+    await pool.query('UPDATE users SET avatar_url = $1 WHERE email = $2', ['https://img.test/mine.png', email]);
 
     withProfile({ email, email_verified: true, name: 'Pic', picture: 'https://img.test/google.png' });
     await signIn({ credential: ID_TOKEN });
 
-    [[row]] = await pool.query('SELECT avatar_url FROM users WHERE email = ?', [email]);
+    [[row]] = await pool.query('SELECT avatar_url FROM users WHERE email = $1', [email]);
     expect(row.avatar_url).toBe('https://img.test/mine.png');
 
     await deleteUserByEmail(email);
@@ -328,8 +328,8 @@ describe('account creation details', () => {
  * was already gone.
  */
 test('removes every account this file created', async () => {
-  const [result] = await pool.query("DELETE FROM users WHERE email LIKE ?", ['gsuite-%@suprema.test']);
-  const [[row]] = await pool.query("SELECT COUNT(*) AS c FROM users WHERE email LIKE ?", ['gsuite-%@suprema.test']);
+  const [result] = await pool.query("DELETE FROM users WHERE email LIKE $1", ['gsuite-%@suprema.test']);
+  const [[row]] = await pool.query("SELECT COUNT(*) AS c FROM users WHERE email LIKE $1", ['gsuite-%@suprema.test']);
 
   expect(row.c).toBe(0);
   expect(result.affectedRows).toBeGreaterThanOrEqual(0);
