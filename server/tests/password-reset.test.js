@@ -6,7 +6,7 @@
  *   - no user enumeration (identical answer for known and unknown addresses)
  *   - tokens stored hashed, never in plaintext
  *   - single use, 30 minute life
- *   - expiry decided by MySQL's clock, never by Node's
+ *   - expiry decided by the database's clock, never by Node's
  *
  * Email sending is disabled by tests/testEnv.js, so the reset link comes back
  * in the response body. That is a development affordance, and one test below

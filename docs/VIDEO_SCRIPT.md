@@ -296,12 +296,13 @@ it in properly.
 ## 7. Part 6 — Closing (11:45–12:30)
 
 ### Shot 6.1 — The architecture, in one diagram
-**Do:** Show a simple diagram — browser, React frontend, Express API, MySQL,
-Cloudinary. Narrate over it.
+**Do:** Show a simple diagram — browser, React frontend, Express API, Supabase
+PostgreSQL, Cloudinary. Narrate over it.
 
 **Say:**
 > "To summarise how it fits together: a React frontend deployed on Vercel, an
-> Express API also on Vercel, a hosted MySQL database, and Cloudinary for media.
+> Express API also on Vercel, a Supabase PostgreSQL database in the same region,
+> and Cloudinary for media.
 > Every request is authenticated with a signed token, and every permission check
 > happens on the server. Hiding a button in the interface is never treated as
 > access control."

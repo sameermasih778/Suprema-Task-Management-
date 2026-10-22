@@ -3,7 +3,7 @@
  *
  * Useful when a seeded/demo account needs a real password, or when nobody can
  * log in to use the admin panel's reset button. Works against whichever
- * database server/.env points at (Aiven in production, local MySQL in dev).
+ * database server/.env points at (Supabase PostgreSQL in production and dev).
  *
  * Usage:
  *   node scripts/set-password.js <email> <new-password>

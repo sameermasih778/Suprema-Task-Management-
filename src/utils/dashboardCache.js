@@ -1,7 +1,7 @@
 /**
  * In-Memory Stale-While-Revalidate (SWR) cache for workspace and dashboard data.
  *
- * Prevents redundant overseas round-trips to the remote MySQL database when navigating
+ * Prevents redundant round-trips to the remote Supabase (PostgreSQL) database when navigating
  * between dashboard tabs (Overview, Tasks, Projects, Calendar, Analytics, Teams).
  *
  * Data is rendered instantly (0ms) from cache, while a silent background sync keeps

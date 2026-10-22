@@ -240,7 +240,7 @@ module.exports = {
 
 /* ───────────────────────────── helpers ───────────────────────────── */
 
-/** MySQL 8 hands back JSON columns parsed; MariaDB hands back a string. */
+/** node-postgres hands JSON columns back parsed; older clients hand back a string. */
 function parseJsonArray(value) {
   if (!value) return [];
   if (Array.isArray(value)) return value;

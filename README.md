@@ -145,13 +145,11 @@ JWT_SECRET=change_this_to_a_long_random_string
 ### 3. Create and seed the database
 
 ```bash
-npm run db:apply-supabase   # creates the 19 tables in Supabase
-npm run db:migrate-data    # copies an existing MySQL database across (optional)
+npm run db:apply-supabase   # creates the 19 tables and indexes in Supabase
 ```
 
-`db:apply-supabase` applies `schema.sql` to your Supabase project. `db:migrate-data` copies
-the rows of an existing MySQL database (Aiven) into Supabase, preserving every id and
-relationship — that is how this project was moved without losing a single account.
+`db:apply-supabase` applies `schema.sql` to your Supabase project; migrations then run
+automatically on every boot (`db:migrate`, or the startup guard in `config/db.js`).
 
 > **⚠️ This deletes every account.** `db:init` and `db:reset` drop the schema, so any user
 > who registered through the UI is permanently removed. Running it as part of your normal
@@ -498,10 +496,9 @@ while the API silently breaks:
    - **Session pooler** (port `5432`) → this is the `DATABASE_URL` for the app
    - **Direct connection** (port `5432` on `db.<ref>.supabase.co`) → used by
      the migration scripts
-4. Apply the schema, and copy any existing data across:
+4. Apply the schema:
    ```bash
    npm run db:apply-supabase   # creates the 19 tables
-   npm run db:migrate-data    # copies an existing MySQL database across
    ```
 5. Put the connection string in `server/.env` and run `npm run dev` locally to
    confirm everything works against Supabase before deploying.

@@ -312,7 +312,7 @@ Full reference in the [Developer Guide](DEVELOPER_GUIDE.md).
 | --- | --- |
 | Frontend | React + Vite (`src/`) |
 | Backend | Node.js + Express (`server/`) |
-| Database | MySQL (Aiven free tier in production) |
+| Database | Supabase (PostgreSQL 17, free tier) |
 | Auth | Password (bcrypt) + Google OAuth + email OTP + JWT |
 | Email | Nodemailer over SMTP |
 | Media | Cloudinary |
@@ -334,10 +334,8 @@ Requires modern Node.js LTS.
 | --- | --- | --- |
 | `PORT` | yes | `5000` locally |
 | `CLIENT_ORIGIN` | yes | Comma-separated CORS origins |
-| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | yes | MySQL connection |
-| `DB_SSL` | production | `true` for hosted databases |
-| `DB_CONNECTION_LIMIT` | production | `5` — free tiers cap connections |
-| `DB_SQL_MODE` | production | Pins a strict SQL mode |
+| `DATABASE_URL` | yes | Supabase PostgreSQL connection string (session pooler URI) |
+| `DB_CONNECTION_LIMIT` | production | `5` - free tiers cap connections |
 | `JWT_SECRET` | **yes** | Long random string; never the dev fallback |
 | `JWT_EXPIRES_IN` | yes | e.g. `7d` |
 | `SMTP_*` | optional | OTP email; unset = codes logged to console |

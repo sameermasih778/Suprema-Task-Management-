@@ -11,7 +11,7 @@ A **monorepo** with two deployable units:
 ```
 .
 ├── src/                  Frontend — React 18 + Vite + React Router + Tailwind
-├── server/               Backend  — Express + MySQL (mysql2)
+├── server/               Backend  — Express + Supabase PostgreSQL (node-postgres)
 ├── docs/                 These guides
 ├── scripts/              Post-build helper (SPA 404 handling)
 ├── vercel.json           SPA rewrites + build settings
@@ -19,9 +19,9 @@ A **monorepo** with two deployable units:
 ```
 
 **Request flow:** browser → Vercel frontend (static React bundle) → calls the
-backend at `/api/v1` → Express middleware → controllers → MySQL.
+backend at `/api/v1` → Express middleware → controllers → Supabase PostgreSQL.
 
-The frontend never talks to MySQL, and the API never returns HTML.
+The frontend never talks to the database directly, and the API never returns HTML.
 
 ---
 
@@ -31,10 +31,10 @@ The frontend never talks to MySQL, and the API never returns HTML.
 | --- | --- | --- |
 | Node.js | 18+ | 20 LTS recommended — the backend uses global `fetch` |
 | npm | 9+ | Ships with Node |
-| MySQL | 8.x | Or a hosted MySQL instance; see section 4 |
+| Database | — | PostgreSQL is fully hosted on Supabase; nothing to install |
 | Git | any | |
 
-Optional but strongly recommended: **Aiven**, **Cloudinary** and a **Vercel**
+Optional but strongly recommended: **Cloudinary** and a **Vercel**
 account for a production-like environment.
 
 ---
@@ -104,10 +104,8 @@ That runs the Vite dev server and the Express server together.
 | `PORT` | yes | `5000` locally |
 | `NODE_ENV` | yes | `development` / `production` |
 | `CLIENT_ORIGIN` | yes | Comma-separated allowed origins, for CORS |
-| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | yes | MySQL connection |
-| `DB_SSL` | production | `true` for hosted providers (Aiven, RDS) |
+| `DATABASE_URL` | yes | Supabase PostgreSQL connection string (session pooler URI) |
 | `DB_CONNECTION_LIMIT` | production | `5` — free tiers cap total connections |
-| `DB_SQL_MODE` | production | Pins a session SQL mode so strict hosts behave like dev |
 | `JWT_SECRET` | **yes** | Long random string. **Never the dev fallback in production** |
 | `JWT_EXPIRES_IN` | yes | e.g. `7d` |
 | `CLOUDINARY_URL` | production | `cloudinary://key:secret@cloud`. Unset = local disk |
@@ -147,15 +145,12 @@ numbering is harmless.
 
 ### Connection behaviour
 
-`server/config/db.js` centralises this and handles two real-world traps:
+`server/config/db.js` centralises this and handles the real-world trap:
 
-- **TLS** — hosted providers require it. `DB_SSL=true` enables encryption with
-  CA verification off, because managed providers rotate certificates that are not
-  in Node's bundle.
-- **SQL mode** — MySQL 8 runs strict by default and will *throw* on data this app
-  legitimately writes (for example an invalid ENUM). `DB_SQL_MODE` pins every
-  pooled connection to the mode the app was built against, so behaviour is
-  identical on any host.
+- **Connection multiplexing** — a Supabase free tier caps total connections, so
+  every process uses a bounded pool (`DB_CONNECTION_LIMIT`). The app talks to the
+  **session pooler** gateway rather than the database directly, so a burst of
+  serverless instances on Vercel cannot exhaust it.
 
 ---
 
@@ -259,12 +254,12 @@ you change anything here:
    30 minutes, and requesting a new link deletes any outstanding one. The claim
    is `UPDATE ... WHERE used_at IS NULL` and checks `affectedRows`, so a token
    cannot be spent twice even if two requests race.
-4. **Expiry is decided by MySQL, never in Node.** This is the subtle one:
-   Aiven stores `DATETIME` in UTC, mysql2 returns it as a plain string, and Node
-   reads that string as *local* time — in a non-UTC timezone that reports a
-   token as expired the instant it is issued. Comparisons therefore live in SQL
-   (`expires_at > NOW()`), exactly as the signup OTP flow already does. **Do not
-   reintroduce `new Date(row.expires_at)` comparisons.**
+4. **Expiry is decided by the database, never in Node.** This is the subtle one:
+   timestamp comparisons therefore live in SQL (`expires_at > NOW()`), using the
+   database's own clock and timezone, exactly as the signup OTP flow already
+   does. Mixing Node's local clock with a UTC-stored timestamp reports a token as
+   expired the instant it is issued in a non-UTC timezone. **Do not reintroduce
+   `new Date(row.expires_at)` comparisons.**
 
 In development with no SMTP configured, the API returns `devResetUrl` so the
 flow is testable. It is never returned when `SMTP_USER` is set, so production
@@ -494,15 +489,17 @@ it fails the run rather than degrading:
 
 | Guard | Why |
 | --- | --- |
-| `DB_NAME` is forced to `suprema_test` | The pool is built from env at require time, so the override has to land first. |
-| `.env` is read back and compared | If someone names their real database `suprema_test`, test and production would be the same database. |
+| `DB_SEARCH_PATH` must start with `suprema_test_` | The pool reads the search path at require time, so every query is pinned to a disposable test schema. The run aborts if the override has not landed. |
+| `.env` is read back and compared | If a run were pointed at `public`, tests could touch the production tables. The harness refuses rather than degrading. |
 | SMTP credentials are forced empty | Otherwise tests would send genuine reset emails to genuine people. |
 
-`tests/globalSetup.js` drops and recreates `suprema_test` before every run, loads
-`schema.sql`, applies the migrations, and seeds five users covering every role
-under test plus a workspace, project, task and attachment. The `DROP` targets the
-literal string `suprema_test` and nothing else - it never reads a database name
-from the environment.
+`tests/globalSetup.js` (per Jest worker) creates a **fresh schema with a unique
+name** (`suprema_test_<base36>`) on Supabase, loads `schema.sql`, applies the
+migrations and seeds the users covering every role under test plus a workspace,
+project, task and attachment. Postgres has no cheap per-database isolation like
+MySQL, so tests isolate by **schema** instead — one schema per run, never shared.
+Old schemas from previous runs are dropped by `npm run db:clean-test-schemas`
+(with a lock timeout, so a stuck one cannot wedge the cleanup).
 
 SMTP is blanked rather than deleted on purpose. `dotenv` repopulates any key that
 is absent from `process.env`, so deleting `SMTP_USER` would put the real

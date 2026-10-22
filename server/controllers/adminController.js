@@ -443,9 +443,9 @@ const broadcastNotification = async (req, res, next) => {
       });
     }
 
-    // Validate against the real ENUM. Without this, a typo (or the old
-    // hardcoded 'announcement') is silently coerced to '' by MySQL instead of
-    // erroring, because this server runs without STRICT_TRANS_TABLES.
+    // Validate against the allowed types before the database does. Postgres'
+    // CHECK constraint would reject an invalid value with an unfriendly 500,
+    // and the traffic still costs a round trip - so keep the check up here.
     const VALID_TYPES = ['info', 'task_assigned', 'mention', 'system', 'announcement'];
     if (!VALID_TYPES.includes(type)) {
       return res.status(400).json({
