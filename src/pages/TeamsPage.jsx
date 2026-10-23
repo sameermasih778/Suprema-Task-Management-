@@ -61,6 +61,11 @@ export default function TeamsPage() {
 
   const canManage = ['super_admin', 'admin', 'member'].includes(user?.role);
   const isStaff = ['super_admin', 'admin', 'developer'].includes(user?.role);
+  // Only the workspace owner, a workspace admin, or staff may invite new
+  // members to THIS workspace. A member who was invited in cannot invite
+  // others to that workspace - only to a workspace they own themselves.
+  const canInviteToWorkspace =
+    isStaff || ['owner', 'admin'].includes(activeWorkspace?.role);
 
   // A notification links straight to the invitation it is about, so the
   // matching card is highlighted when the page is opened from the bell.
@@ -265,7 +270,7 @@ export default function TeamsPage() {
           </p>
         </div>
 
-        {canManage && (
+        {canInviteToWorkspace && (
           <div className="flex items-center gap-2.5">
             <motion.button
               whileHover={{ scale: 1.03 }}

@@ -70,8 +70,15 @@ const pool = new Pool({
 });
 
 /** Reads are answered with rows; writes are answered with a result header. */
-const isReadQuery = (sql) =>
-  /^\s*(SELECT|WITH|SHOW|EXPLAIN|TABLE|VALUES)\b/i.test(sql || '');
+const isReadQuery = (sql) => {
+  const s = sql || '';
+  // Plain SELECT/... are reads.
+  if (/^\s*(SELECT|WITH|SHOW|EXPLAIN|TABLE|VALUES)\b/i.test(s)) return true;
+  // UPDATE/DELETE ... RETURNING yields rows to the caller (there is no
+  // insertId concept for those, so the caller expects the returned rows).
+  if (/^\s*(UPDATE|DELETE)\b/i.test(s) && /\bRETURNING\b/i.test(s)) return true;
+  return false;
+};
 
 /**
  * Present a node-postgres result in the mysql2 shape.

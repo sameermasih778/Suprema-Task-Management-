@@ -39,10 +39,26 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Editable profile fields (name + email). Synced from the auth context.
+  const [profileName, setProfileName] = useState('');
+  const [profileEmail, setProfileEmail] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  // Email-change verification flow (code sent to the new address).
+  const [emailCode, setEmailCode] = useState('');
+  const [emailCodeSent, setEmailCodeSent] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [verifyingEmail, setVerifyingEmail] = useState(false);
   // A stored path can outlive its file (cleared disk, migrated to cloud, or a
   // blocked cross-origin load). Track the failure so the tile falls back to
   // initials instead of rendering an empty circle.
   const [imageBroken, setImageBroken] = useState(false);
+
+  // Keep the editable fields in sync with the signed-in user (including after
+  // a profile refresh triggered by avatar upload or by this save).
+  useEffect(() => {
+    setProfileName(user?.name || '');
+    setProfileEmail(user?.email || '');
+  }, [user?.id, user?.name, user?.email]);
 
   // Object URLs must be revoked or the blob stays in memory for the session.
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
@@ -136,6 +152,100 @@ export default function ProfilePage() {
     }
   };
 
+  const handleSaveName = async () => {
+    const trimmedName = profileName.trim();
+    if (!trimmedName) {
+      toast.error('Name cannot be empty.');
+      return;
+    }
+    if (trimmedName === (user?.name || '')) {
+      toast.info('Nothing to save.');
+      return;
+    }
+
+    setSavingProfile(true);
+    try {
+      const res = await api.put('/auth/me', { name: trimmedName });
+
+      if (res.token) {
+        localStorage.setItem('suprema_token', res.token);
+        sessionStorage.setItem('suprema_token', res.token);
+      }
+      const raw = localStorage.getItem('suprema_user');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          parsed.name = res.user?.name ?? trimmedName;
+          localStorage.setItem('suprema_user', JSON.stringify(parsed));
+        } catch { /* advisory */ }
+      }
+
+      toast.success('Name updated');
+      window.dispatchEvent(new Event('suprema:profile-updated'));
+    } catch (err) {
+      toast.error(err.data?.message || err.message || 'Could not update name');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleRequestEmailChange = async () => {
+    const trimmedEmail = profileEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmedEmail)) {
+      toast.error('Enter a valid email address.');
+      return;
+    }
+    if (trimmedEmail === (user?.email || '').toLowerCase()) {
+      toast.info('That is already your email.');
+      return;
+    }
+
+    setSendingCode(true);
+    try {
+      const res = await api.post('/auth/me/email/request-change', { email: trimmedEmail });
+      toast.success(res.message || 'Verification code sent');
+      setEmailCode('');
+      setEmailCodeSent(true);
+    } catch (err) {
+      toast.error(err.data?.message || err.message || 'Could not send verification code');
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleVerifyEmailChange = async () => {
+    const trimmedEmail = profileEmail.trim().toLowerCase();
+    const code = emailCode.trim();
+    if (!code) {
+      toast.error('Enter the verification code.');
+      return;
+    }
+
+    setVerifyingEmail(true);
+    try {
+      const res = await api.post('/auth/me/email/verify-change', { email: trimmedEmail, otp: code });
+      if (res.token) {
+        localStorage.setItem('suprema_token', res.token);
+        sessionStorage.setItem('suprema_token', res.token);
+      }
+      const raw = localStorage.getItem('suprema_user');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          parsed.email = res.user?.email ?? trimmedEmail;
+          localStorage.setItem('suprema_user', JSON.stringify(parsed));
+        } catch { /* advisory */ }
+      }
+      toast.success('Email updated');
+      setEmailCode('');
+      setEmailCodeSent(false);
+      window.dispatchEvent(new Event('suprema:profile-updated'));
+    } catch (err) {
+      toast.error(err.data?.message || err.message || 'Verification failed');
+    } finally {
+      setVerifyingEmail(false);
+    }
+  };
   const handleDrop = (e) => {
     e.preventDefault();
     setDragging(false);
@@ -237,20 +347,65 @@ export default function ProfilePage() {
           </div>
 
           {/* Details */}
-          <dl className="min-w-0 flex-1 space-y-3">
+          <dl className="min-w-0 flex-1 space-y-4">
             <div>
               <dt className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
                 <User className="h-3 w-3" /> Full name
               </dt>
-              <dd className="mt-0.5 truncate text-sm font-semibold text-white">
-                {user?.name || '—'}
+              <dd className="mt-1">
+                <input
+                  type="text"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  maxLength={100}
+                  className="w-full rounded-xl border border-white/10 bg-zinc-900 px-3.5 py-2 text-sm font-semibold text-white placeholder-zinc-500 focus:border-indigo-500/60 focus:outline-none transition-all"
+                />
               </dd>
             </div>
             <div>
               <dt className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
                 <Mail className="h-3 w-3" /> Email
               </dt>
-              <dd className="mt-0.5 truncate text-sm text-zinc-300">{user?.email || '—'}</dd>
+              <dd className="mt-1 space-y-2">
+                <input
+                  type="email"
+                  value={profileEmail}
+                  onChange={(e) => { setProfileEmail(e.target.value); setEmailCodeSent(false); setEmailCode(''); }}
+                  maxLength={150}
+                  className="w-full rounded-xl border border-white/10 bg-zinc-900 px-3.5 py-2 text-sm text-zinc-300 placeholder-zinc-500 focus:border-indigo-500/60 focus:outline-none transition-all"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRequestEmailChange}
+                    disabled={sendingCode || emailCodeSent}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-zinc-900 px-3.5 py-2 text-xs font-semibold text-zinc-300 transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {sendingCode && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {emailCodeSent ? 'Code sent' : 'Send verification code'}
+                  </button>
+                </div>
+                {emailCodeSent && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={emailCode}
+                      onChange={(e) => setEmailCode(e.target.value.replace(/\\D/g, '').slice(0, 6))}
+                      placeholder="6-digit code"
+                      className="w-32 rounded-xl border border-white/10 bg-zinc-900 px-3.5 py-2 text-sm font-mono text-white placeholder-zinc-500 focus:border-indigo-500/60 focus:outline-none transition-all"
+                    />
+                    <button
+                      onClick={handleVerifyEmailChange}
+                      disabled={verifyingEmail || emailCode.length !== 6}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {verifyingEmail && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {verifyingEmail ? 'Verifying…' : 'Verify & update email'}
+                    </button>
+                  </div>
+                )}
+              </dd>
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-3">
               <div>
@@ -269,6 +424,17 @@ export default function ProfilePage() {
                   {activeWorkspace?.name || '—'}
                 </dd>
               </div>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={handleSaveName}
+                disabled={savingProfile}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingProfile && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {savingProfile ? 'Saving…' : 'Save name'}
+              </button>
             </div>
           </dl>
         </div>

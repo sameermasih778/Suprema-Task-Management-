@@ -47,6 +47,9 @@ router.post(
 
 // Protected Routes (JWT Token Required)
 router.get('/me', authenticateToken, authController.getMe);
+router.put('/me', authenticateToken, authController.updateProfile);
+router.post('/me/email/request-change', authenticateToken, authController.requestEmailChange);
+router.post('/me/email/verify-change', authenticateToken, authController.verifyEmailChange);
 
 /**
  * Profile picture.

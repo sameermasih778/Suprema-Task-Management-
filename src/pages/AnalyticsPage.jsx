@@ -19,8 +19,15 @@ import { motion } from 'framer-motion';
 import { getWorkspaceCollection, setWorkspaceCollection } from '../utils/dashboardCache';
 
 export default function AnalyticsPage() {
-  const { activeWorkspace } = useAuth();
+  const { activeWorkspace, user } = useAuth();
   const wsId = activeWorkspace?.id;
+  // The "Collaborator Workload & Time Allocation" table shows every member's
+  // task counts and logged hours. A member who was invited to this workspace
+  // (and is not its owner/admin) must not see other collaborators' workload
+  // - only the owner/admin of the workspace, or staff, see that section.
+  const canViewCollaboratorWorkload =
+    ['super_admin', 'admin', 'developer'].includes(user?.role) ||
+    ['owner', 'admin'].includes(activeWorkspace?.role);
 
   const cachedProjs = getWorkspaceCollection(wsId, 'projects');
   const cachedTasks = getWorkspaceCollection(wsId, 'tasks');
@@ -368,8 +375,9 @@ export default function AnalyticsPage() {
 
       </div>
 
-      {/* Row 3: Collaborator Workload Table */}
-      <div className="bg-zinc-950 border border-white/10 rounded-3xl p-6 space-y-4 shadow-xl">
+      {canViewCollaboratorWorkload && (
+        <div className="bg-zinc-950 border border-white/10 rounded-3xl p-6 space-y-4 shadow-xl">
+          {/* Row 3: Collaborator Workload Table */}
         <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
           <Users className="w-4 h-4 text-indigo-400" />
           <span>Collaborator Workload & Time Allocation</span>
@@ -428,6 +436,7 @@ export default function AnalyticsPage() {
           </table>
         </div>
       </div>
+      )}
     </div>
   );
 }
