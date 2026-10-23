@@ -35,14 +35,32 @@ const getTeams = async (req, res, next) => {
       });
     }
 
-    const [teams] = await pool.query(
-      `SELECT t.id, t.workspace_id, t.name, t.description, t.created_by, t.created_at,
-              (SELECT COUNT(*) FROM team_members tm WHERE tm.team_id = t.id) AS member_count
-       FROM teams t 
-       WHERE t.workspace_id = $1 
-       ORDER BY t.created_at DESC`,
-      [workspace_id]
-    );
+    const userId = req.user.id;
+    const isStaff = ['super_admin', 'admin', 'developer'].includes(req.user.role);
+
+    // A workspace owner/admin (or staff) may see every team in the workspace.
+    // A plain member only sees the teams they actually belong to - otherwise
+    // an invited member would see (and be tempted to manage) teams they were
+    // never added to.
+    let canSeeAll = isStaff;
+    if (!canSeeAll) {
+      const [wm] = await pool.query(
+        'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
+        [workspace_id, userId]
+      );
+      if (wm.length > 0 && ['owner', 'admin'].includes(wm[0].role)) canSeeAll = true;
+    }
+
+    const baseSql = `SELECT t.id, t.workspace_id, t.name, t.description, t.created_by, t.created_at,
+            (SELECT COUNT(*) FROM team_members tm WHERE tm.team_id = t.id) AS member_count
+     FROM teams t
+     WHERE t.workspace_id = $1`;
+    const sql = canSeeAll
+      ? `${baseSql} ORDER BY t.created_at DESC`
+      : `${baseSql} AND EXISTS (SELECT 1 FROM team_members tm2 WHERE tm2.team_id = t.id AND tm2.user_id = $2) ORDER BY t.created_at DESC`;
+    const params = canSeeAll ? [workspace_id] : [workspace_id, userId];
+
+    const [teams] = await pool.query(sql, params);
 
     res.status(200).json({
       success: true,
