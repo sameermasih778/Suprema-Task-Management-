@@ -66,6 +66,10 @@ export default function TeamsPage() {
   // others to that workspace - only to a workspace they own themselves.
   const canInviteToWorkspace =
     isStaff || ['owner', 'admin'].includes(activeWorkspace?.role);
+  // A member who was invited into a workspace must not see the full
+  // collaborator roster of that workspace - only the workspace owner/admin
+  // (or staff) see it. They always see it for a workspace they own.
+  const canViewWorkspaceCollaborators = canInviteToWorkspace;
 
   // A notification links straight to the invitation it is about, so the
   // matching card is highlighted when the page is opened from the bell.
@@ -505,8 +509,10 @@ export default function TeamsPage() {
         )}
       </div>
 
-      {/* SECTION 2: WORKSPACE COLLABORATORS TABLE */}
-      <div className="space-y-4">
+      {canViewWorkspaceCollaborators && (
+        <>
+          {/* SECTION 2: WORKSPACE COLLABORATORS TABLE */}
+          <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
             <span>Workspace Collaborators</span>
@@ -590,9 +596,9 @@ export default function TeamsPage() {
           </table>
         </div>
       </div>
+      </>
+      )}
 
-      {/* ==================================================================== */}
-      {/* MODAL 1: CREATE TEAM MODAL */}
       {/* ==================================================================== */}
       {/* These modals are rendered through a portal into <body>.
           DashboardLayout animates a `filter` on the page wrapper, and any
