@@ -5,8 +5,20 @@ const { logActivity } = require('../utils/activityLogger');
 // only manage the teams they created themselves - without this, any signed-in
 // user could add/remove members from any team in the workspace.
 const STAFF_ROLES = ['super_admin', 'admin', 'developer'];
-const canManageTeam = (req, team) =>
-  STAFF_ROLES.includes(req.user.role) || Number(team.created_by) === Number(req.user.id);
+const canManageTeam = async (req, team) => {
+  if (STAFF_ROLES.includes(req.user.role)) return true;
+  // Only the creator of the team AND an owner/admin of the workspace it
+  // lives in may manage it. Being the creator alone is not enough - an
+  // invited member who created a team in a workspace they were only
+  // invited into must not be able to edit it or add members to it.
+  if (Number(team.created_by) !== Number(req.user.id)) return false;
+
+  const [rows] = await pool.query(
+    'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
+    [team.workspace_id, req.user.id]
+  );
+  return rows.length > 0 && ['owner', 'admin'].includes(rows[0].role);
+};
 
 /**
  * GET /api/v1/teams?workspace_id=1
@@ -184,10 +196,10 @@ const addTeamMember = async (req, res, next) => {
       });
     }
 
-    if (!canManageTeam(req, teamRows[0])) {
+    if (!(await canManageTeam(req, teamRows[0]))) {
       return res.status(403).json({
         success: false,
-        message: 'Forbidden: you can only add members to teams you created'
+        message: 'Forbidden: you can only manage teams in workspaces you own or administer'
       });
     }
 
@@ -265,10 +277,10 @@ const removeTeamMember = async (req, res, next) => {
       });
     }
 
-    if (!canManageTeam(req, teamRows[0])) {
+    if (!(await canManageTeam(req, teamRows[0]))) {
       return res.status(403).json({
         success: false,
-        message: 'Forbidden: you can only remove members from teams you created'
+        message: 'Forbidden: you can only manage teams in workspaces you own or administer'
       });
     }
 
@@ -311,10 +323,10 @@ const deleteTeam = async (req, res, next) => {
       });
     }
 
-    if (!canManageTeam(req, teamRows[0])) {
+    if (!(await canManageTeam(req, teamRows[0]))) {
       return res.status(403).json({
         success: false,
-        message: 'Forbidden: you can only delete teams you created'
+        message: 'Forbidden: you can only manage teams in workspaces you own or administer'
       });
     }
 

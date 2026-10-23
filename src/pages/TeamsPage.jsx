@@ -81,7 +81,9 @@ export default function TeamsPage() {
   // the same rule; this just keeps the UI honest about it.
   const canManageThisTeam =
     selectedTeam != null &&
-    (isStaff || Number(selectedTeam.created_by) === Number(user?.id));
+    (isStaff ||
+      (Number(selectedTeam.created_by) === Number(user?.id) &&
+       ['owner', 'admin'].includes(activeWorkspace?.role)));
 
   const fetchData = async () => {
     if (!activeWorkspace?.id) return;
