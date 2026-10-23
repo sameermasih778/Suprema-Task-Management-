@@ -584,6 +584,37 @@ const googleSignIn = async (req, res, next) => {
       };
       createdAccount = true;
       console.log(`[Auth] Google sign-up created member account ${user.email}`);
+
+      // A brand new Google account needs the same default workspace that email
+      // signup creates. Without it the dashboard opens with no active
+      // workspace, and creating anything (project, task, team) trips the
+      // front end's "required" guard even though every field was filled.
+      const accountName = name || normalisedEmail.split('@')[0];
+      const accountWorkspaceName = `${accountName}'s Workspace`;
+      const accountWorkspaceSlug = `ws-${user.id}-${Date.now().toString(36)}`;
+
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [workspaceResult] = await connection.query(
+          'INSERT INTO workspaces (name, slug, owner_id, plan) VALUES ($1, $2, $3, $4) RETURNING id',
+          [accountWorkspaceName, accountWorkspaceSlug, user.id, 'free']
+        );
+        const accountWorkspaceId = workspaceResult.insertId;
+        await connection.query(
+          "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3)",
+          [accountWorkspaceId, user.id, 'owner']
+        );
+        await connection.commit();
+        console.log(`[Auth] Default workspace created for ${user.email}`);
+      } catch (wsErr) {
+        await connection.rollback();
+        connection.release();
+        // The account itself already exists and is usable - rethrow so the
+        // client sees the failure rather than silently missing a workspace.
+        throw wsErr;
+      }
+      connection.release();
     } else if (user.status !== 'active') {
       return res.status(403).json({
         success: false,
@@ -602,6 +633,37 @@ const googleSignIn = async (req, res, next) => {
        WHERE wm.user_id = $1`,
       [user.id]
     );
+
+    // Repair accounts that signed up through Google before the default
+    // workspace existed on this path: if they have no workspace at all,
+    // create one now so the dashboard is not an empty shell with a
+    // misleading "required" error in every create form.
+    if (workspaces.length === 0) {
+      const repairName = `${user.name}'s Workspace`;
+      const repairSlug = `ws-${user.id}-${Date.now().toString(36)}`;
+
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [workspaceResult] = await connection.query(
+          'INSERT INTO workspaces (name, slug, owner_id, plan) VALUES ($1, $2, $3, $4) RETURNING id',
+          [repairName, repairSlug, user.id, 'free']
+        );
+        const repairId = workspaceResult.insertId;
+        await connection.query(
+          "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3)",
+          [repairId, user.id, 'owner']
+        );
+        await connection.commit();
+        workspaces.unshift({ id: repairId, name: repairName, slug: repairSlug, plan: 'free', status: 'active', role: 'owner' });
+        console.log(`[Auth] Missing default workspace created for returning user ${user.email}`);
+      } catch (wsErr) {
+        await connection.rollback();
+        throw wsErr;
+      } finally {
+        connection.release();
+      }
+    }
 
     const userPayload = {
       id: user.id,

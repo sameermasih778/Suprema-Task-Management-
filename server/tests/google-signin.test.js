@@ -186,6 +186,34 @@ describe('role guarantees', () => {
     expect(row.status).toBe('active');
   });
 
+  test('a fresh Google signup gets a default workspace (the teacher-project bug)', async () => {
+    const email = `${marker()}@suprema.test`;
+    withProfile({ email, email_verified: true, name: 'Workspace Check' });
+
+    const res = await signIn({ credential: ID_TOKEN });
+    expect(res.status).toBe(200);
+    expect(res.body.createdAccount).toBe(true);
+
+    // The API lists at least one workspace, owned by the new account.
+    const list = await request(app)
+      .get('/api/v1/workspaces')
+      .set('Authorization', `Bearer ${res.body.token}`);
+    expect(list.status).toBe(200);
+
+    const [[row]] = await pool.query(
+      `SELECT w.name, wm.role FROM workspace_members wm
+         JOIN users u ON u.id = wm.user_id
+         JOIN workspaces w ON w.id = wm.workspace_id
+        WHERE u.email = $1`,
+      [email]
+    );
+    expect(row).toBeDefined();
+    expect(row.role).toBe('owner');
+    expect(row.name).toBe('Workspace Check' + "'s Workspace");
+
+    await deleteUserByEmail(email);
+  });
+
   test('signing in does NOT rewrite an existing role', async () => {
     const email = `${marker()}@suprema.test`;
     await createUser({ name: 'Promoted Staff', email, role: 'developer' });
@@ -328,8 +356,12 @@ describe('account creation details', () => {
  * was already gone.
  */
 test('removes every account this file created', async () => {
-  const [result] = await pool.query("DELETE FROM users WHERE email LIKE $1", ['gsuite-%@suprema.test']);
-  const [[row]] = await pool.query("SELECT COUNT(*) AS c FROM users WHERE email LIKE $1", ['gsuite-%@suprema.test']);
+  const like = 'gsuite-%@suprema.test';
+  // Owned workspaces go first: the schema's RESTRICT on owner_id means the
+  // user rows cannot go while a workspace still points at them.
+  await pool.query('DELETE FROM workspaces WHERE owner_id IN (SELECT id FROM users WHERE email LIKE $1)', [like]);
+  const [result] = await pool.query('DELETE FROM users WHERE email LIKE $1', [like]);
+  const [[row]] = await pool.query('SELECT COUNT(*) AS c FROM users WHERE email LIKE $1', [like]);
 
   expect(row.c).toBe(0);
   expect(result.affectedRows).toBeGreaterThanOrEqual(0);

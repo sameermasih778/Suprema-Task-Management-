@@ -61,7 +61,11 @@ export default function CreateProjectModal({ isOpen, onClose, onProjectSaved, pr
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !activeWorkspace?.id) {
+    if (!activeWorkspace?.id) {
+      setError('No workspace loaded. Please reload the page - a project needs a workspace to belong to.');
+      return;
+    }
+    if (!name || name.trim() === '') {
       setError('Project Name is required.');
       return;
     }

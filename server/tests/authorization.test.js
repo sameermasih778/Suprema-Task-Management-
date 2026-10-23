@@ -184,3 +184,92 @@ describe('role gating across staff endpoints', () => {
     ).toBe(200);
   });
 });
+
+describe('DELETE /projects/:id - only the right people delete a project', () => {
+  /**
+   * A fresh project so a successful delete never consumes a shared fixture,
+   * and so the 403 check below cannot wipe data another test depends on.
+   */
+  const createProject = async (creatorId) => {
+    const [result] = await pool.query(
+      `INSERT INTO projects (workspace_id, name, status, created_by)
+       VALUES ($1, $2, 'active', $3) RETURNING id`,
+      [F.workspaceId, `Del-probe ${Date.now()}`, creatorId]
+    );
+    return result.insertId;
+  };
+
+  test('rejects an unauthenticated caller', async () => {
+    const id = await createProject(F.member.id);
+    const res = await request(app).delete(`/api/v1/projects/${id}`);
+    expect(res.status).toBe(401);
+
+    const [rows] = await pool.query('SELECT id FROM projects WHERE id = $1', [id]);
+    expect(rows).toHaveLength(1);
+    await pool.query('DELETE FROM projects WHERE id = $1', [id]);
+  });
+
+  test('returns 404 for a project that does not exist', async () => {
+    const res = await request(app)
+      .delete('/api/v1/projects/99999999')
+      .set(auth(F.superAdmin));
+    expect(res.status).toBe(404);
+  });
+
+  test('refuses a member who did not create it', async () => {
+    const id = await createProject(F.uploader.id);
+
+    const res = await request(app)
+      .delete(`/api/v1/projects/${id}`)
+      .set(auth(F.member));
+
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/only delete projects you created/i);
+
+    const [rows] = await pool.query('SELECT id FROM projects WHERE id = $1', [id]);
+    expect(rows).toHaveLength(1);
+    await pool.query('DELETE FROM projects WHERE id = $1', [id]);
+  });
+
+  test('allows the project creator to delete their own project', async () => {
+    const id = await createProject(F.member.id);
+
+    const res = await request(app)
+      .delete(`/api/v1/projects/${id}`)
+      .set(auth(F.member));
+    expect(res.status).toBe(200);
+
+    const [rows] = await pool.query('SELECT id FROM projects WHERE id = $1', [id]);
+    expect(rows).toHaveLength(0);
+  });
+
+  test('staff can delete a project they did not create', async () => {
+    const id = await createProject(F.member.id);
+
+    const res = await request(app)
+      .delete(`/api/v1/projects/${id}`)
+      .set(auth(F.admin));
+    expect(res.status).toBe(200);
+
+    const [rows] = await pool.query('SELECT id FROM projects WHERE id = $1', [id]);
+    expect(rows).toHaveLength(0);
+  });
+
+  test('deleting a project removes its tasks (schema cascade)', async () => {
+    const id = await createProject(F.superAdmin.id);
+    const task = await pool.query(
+      `INSERT INTO tasks (project_id, title, created_by)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [id, `Cascade probe ${Date.now()}`, F.superAdmin.id]
+    );
+    const taskId = task.insertId;
+
+    const res = await request(app)
+      .delete(`/api/v1/projects/${id}`)
+      .set(auth(F.superAdmin));
+    expect(res.status).toBe(200);
+
+    const [rows] = await pool.query('SELECT id FROM tasks WHERE id = $1', [taskId]);
+    expect(rows).toHaveLength(0);
+  });
+});

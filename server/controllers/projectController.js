@@ -100,6 +100,67 @@ const createProject = async (req, res, next) => {
 };
 
 /**
+ * DELETE /api/v1/projects/:id
+ * Delete a project (its tasks cascade through the schema's FK).
+ *
+ * Allowed: the project creator, the workspace owner, a workspace admin,
+ * or staff. Matches the rule the attachment and permission endpoints use:
+ * a plain member cannot delete someone else's project.
+ */
+const deleteProject = async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    const [existing] = await pool.query(
+      `SELECT p.id, p.workspace_id, p.created_by,
+              u.id IS NOT NULL AND u.role IN ('super_admin', 'admin') AS is_staff
+         FROM projects p
+         LEFT JOIN users u ON u.id = $1
+        WHERE p.id = $2`,
+      [userId, projectId]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found'
+      });
+    }
+
+    if (!existing[0].is_staff) {
+      const [membership] = await pool.query(
+        `SELECT pm.role FROM workspace_members pm JOIN projects p ON p.workspace_id = pm.workspace_id
+          WHERE pm.workspace_id = (SELECT workspace_id FROM projects WHERE id = $1) AND pm.user_id = $2`,
+        [projectId, userId]
+      );
+
+      const allowed =
+        existing[0].created_by === userId ||
+        membership.some((m) => m.role === 'owner' || m.role === 'admin');
+
+      if (!allowed) {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: You can only delete projects you created'
+        });
+      }
+    }
+
+    await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+
+    res.status(200).json({
+      success: true,
+      message: 'Project deleted successfully'
+    });
+
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * GET /api/v1/projects/:id
  * Fetch single project by ID
  */
@@ -178,5 +239,6 @@ module.exports = {
   getProjects,
   createProject,
   getProjectById,
-  updateProject
+  updateProject,
+  deleteProject
 };

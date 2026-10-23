@@ -94,7 +94,17 @@ const createUser = async ({ name, email, role = 'member', passwordHash }) => {
   return { id: result.insertId, name, email, role };
 };
 
+/**
+ * Delete a test account completely.
+ *
+ * Test users now own a default workspace (the Google sign-up path creates
+ * one), and the schema protects that link with RESTRICT - so clear the
+ * owned workspaces before deleting the account rows. Membership rows
+ * themselves need no manual handling: they either cascade with the
+ * workspace or with the user, depending on which one goes first.
+ */
 const deleteUserByEmail = async (email) => {
+  await pool.query('DELETE FROM workspaces WHERE owner_id = (SELECT id FROM users WHERE email = $1)', [email]);
   await pool.query('DELETE FROM users WHERE email = $1', [email]);
 };
 
